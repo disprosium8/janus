@@ -19,6 +19,7 @@ from janus.api.models_api import (
     LogQuery,
     ActiveQuery,
     NodeQuery,
+    ProfileQuery,
     LogPath,
     ActivePath,
     NodePath,
@@ -26,8 +27,10 @@ from janus.api.models_api import (
     ProfileResourcePath,
     ProfileFullByPath,
     AuthPath,
+    AuthRequest,
 )
-from janus.api.constants import Constants
+from janus.api.utils import Constants
+
 from janus import settings
 from janus.settings import cfg
 
@@ -188,8 +191,8 @@ def get_nodes(query: NodeQuery):
     return jsonify(dbase.all(table))
 
 
-@api.get("/nodes/name/<node>", summary="Get node by name")
-@api.get("/nodes/id/<int:id>", summary="Get node by ID")
+@api.get("/nodes/<node>", summary="Get node by name")
+@api.get("/nodes/<int:id>", summary="Get node by ID")
 @httpauth.login_required
 def get_node_by_id_or_name(path: NodePath):
     node = path.node
@@ -224,8 +227,8 @@ def add_node(body: AddEndpointRequest):
         raise InternalServerError(f"Adding endpoint failed: {e}")
 
 
-@api.delete("/nodes/name/<node>", summary="Delete node by name")
-@api.delete("/nodes/id/<int:id>", summary="Delete node by ID")
+@api.delete("/nodes/<node>", summary="Delete node by name")
+@api.delete("/nodes/<int:id>", summary="Delete node by ID")
 @httpauth.login_required
 @admin_required
 def delete_node(path: NodePath):
@@ -374,7 +377,7 @@ def exec_command(body: ExecRequest):
 
 
 @api.get("/images", summary="Get images")
-@api.get("/images/name/<path:name>", summary="Get a specific image")
+@api.get("/images/<path:name>", summary="Get a specific image")
 @httpauth.login_required
 def get_images(path: ImagePath):
     """
@@ -389,11 +392,6 @@ def get_images(path: ImagePath):
             return {"error": "Not found"}, 404
         return jsonify(res)
     return jsonify(dbase.all(table))
-
-
-class ProfileQuery(BaseModel):
-    refresh: Optional[bool] = False
-    reset: Optional[bool] = False
 
 
 def _handle_get_profiles(resource, query, rname=None):
@@ -602,37 +600,132 @@ def delete_profile(path: ProfileFullByPath):
     return {}, 204
 
 
+RESOURCE_DB_MAP = {
+    "nodes": "nodes",
+    "images": "images",
+    "profiles": "host",
+    "active": "active",
+}
+
+
 @api.get("/auth/<path:resource>", summary="Get auth info")
-@api.get(
-    "/auth/res/<path:resource>/id/<int:rid>", summary="Get specific auth info by ID"
-)
-@api.get(
-    "/auth/res/<path:resource>/name/<path:rname>",
-    summary="Get specific auth info by name",
-)
+@api.get("/auth/<path:resource>/<int:rid>", summary="Get specific auth info by ID")
+@api.get("/auth/<path:resource>/<path:rname>", summary="Get specific auth info by name")
 @httpauth.login_required
 def get_auth(path: AuthPath):
     """
-    List all auth info or a specific auth info.
+    Get user and group attributes for a named resource.
     """
     resource = path.resource
     rid = path.rid
     rname = path.rname
+    
+    if resource == "jwt":
+        return {"jwt": cfg.sm.get_auth_token()}, 200
+        
+    if resource not in Constants.AUTH_RESOURCES:
+        return {"error": f"Invalid resource path: {resource}"}, 404
+
     (user, group) = get_authinfo(request)
-    dbase = cfg.db
-    table = dbase.get_table("auth")
     quser = QueryUser()
-    q = quser.query_builder(user, group, {"resource": resource})
-    if rid:
-        q = quser.query_builder(user, group, {"resource": resource, "id": rid})
-        res = dbase.get(table, query=q)
-        if not res:
-            return {"error": "Not found"}, 404
-        return jsonify(res)
-    if rname:
-        q = quser.query_builder(user, group, {"resource": resource, "name": rname})
-        res = dbase.get(table, query=q)
-        if not res:
-            return {"error": "Not found"}, 404
-        return jsonify(res)
-    return jsonify(dbase.search(table, query=q))
+    query = quser.query_builder(user, group, {"id": rid, "name": rname})
+    
+    if not query:
+        return {"error": "Must specify resource id or name"}, 400
+        
+    dbase = cfg.db
+    table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
+    res = dbase.get(table, query=query)
+    
+    if not res:
+        return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
+        
+    users = res.get("users", list())
+    groups = res.get("groups", list())
+    return {"users": users, "groups": groups}, 200
+
+
+@api.post("/auth/<path:resource>/<int:rid>", summary="Update auth info by ID")
+@api.post("/auth/<path:resource>/<path:rname>", summary="Update auth info by name")
+@httpauth.login_required
+def post_auth(path: AuthPath, body: AuthRequest):
+    """
+    Set user and group attributes for a named resource.
+    """
+    resource = path.resource
+    rid = path.rid
+    rname = path.rname
+    
+    if resource not in Constants.AUTH_RESOURCES:
+        return {"error": f"Invalid resource path: {resource}"}, 404
+
+    (user, group) = get_authinfo(request)
+    quser = QueryUser()
+    query = quser.query_builder(user, group, {"id": rid, "name": rname})
+    
+    if not query:
+        return {"error": "Must specify resource id or name"}, 400
+
+    dbase = cfg.db
+    table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
+    res = dbase.get(table, query=query)
+    
+    if not res:
+        return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
+
+    req_users = body.users
+    req_groups = body.groups
+    
+    new_users = list(set(req_users).union(set(res.get("users", list()))))
+    new_groups = list(set(req_groups).union(set(res.get("groups", list()))))
+    res["users"] = new_users
+    res["groups"] = new_groups
+    dbase.update(table, res, query=query)
+    
+    return res, 200
+
+
+@api.delete("/auth/<path:resource>/<int:rid>", summary="Delete auth info by ID")
+@api.delete("/auth/<path:resource>/<path:rname>", summary="Delete auth info by name")
+@httpauth.login_required
+def delete_auth(path: AuthPath, body: AuthRequest):
+    """
+    Remove user and group attributes for a named resource.
+    """
+    resource = path.resource
+    rid = path.rid
+    rname = path.rname
+    
+    if resource not in Constants.AUTH_RESOURCES:
+        return {"error": f"Invalid resource path: {resource}"}, 404
+
+    (user, group) = get_authinfo(request)
+    quser = QueryUser()
+    query = quser.query_builder(user, group, {"id": rid, "name": rname})
+    
+    if not query:
+        return {"error": "Must specify resource id or name"}, 400
+
+    dbase = cfg.db
+    table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
+    res = dbase.get(table, query=query)
+    
+    if not res:
+        return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
+
+    req_users = body.users
+    req_groups = body.groups
+
+    for u in req_users:
+        try:
+            res["users"].remove(u)
+        except Exception:
+            pass
+    for g in req_groups:
+        try:
+            res["groups"].remove(g)
+        except Exception:
+            pass
+            
+    dbase.update(table, res, query=query)
+    return res, 200

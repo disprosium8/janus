@@ -75,6 +75,11 @@ class NodeQuery(BaseModel):
     refresh: Optional[bool] = Field(False, description="Refresh nodes from backends")
 
 
+class ProfileQuery(BaseModel):
+    refresh: Optional[bool] = Field(False, description="Refresh profiles from files")
+    reset: Optional[bool] = Field(False, description="Reset database tables")
+
+
 # Path Models for Flask-OpenAPI3
 class ActivePath(BaseModel):
     aid: Optional[int] = Field(None, description="Active session ID")
