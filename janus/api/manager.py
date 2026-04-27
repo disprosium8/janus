@@ -15,6 +15,10 @@ from janus.settings import cfg, AGENT_AUTO_TUNE
 log = logging.getLogger(__name__)
 
 
+class ServiceManagerException(Exception):
+    pass
+
+
 class ServiceManager:
     def __init__(self, db):
         self._db = db

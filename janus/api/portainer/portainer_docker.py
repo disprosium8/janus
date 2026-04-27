@@ -234,13 +234,19 @@ class PortainerDockerApi(Service):
         eapi = EndpointsApi(self.client)
         eptype = 2  # We use Portainer Agent registration method
         kwargs = {
-            "url": ep.url,
-            "public_url": ep.public_url,
             "tls": "true",
             "tls_skip_verify": "true",
             "tls_skip_client_verify": "true",
         }
-        return eapi.endpoint_create(ep.name, eptype, **kwargs)
+        if ep.url:
+            kwargs["url"] = ep.url
+        if ep.public_url:
+            kwargs["public_url"] = ep.public_url
+
+        res = eapi.endpoint_create(ep.name, eptype, **kwargs)
+        if hasattr(res, "to_dict"):
+            return res.to_dict()
+        return res
 
     @auth
     def remove_node(self, nid):
@@ -535,6 +541,7 @@ class PortainerDockerApi(Service):
         string = res.read().decode("utf-8")
         return {"response": string}
 
+    @auth
     def exec_stream(self, node, container, exec_id):
         ws_url = f"{cfg.PORTAINER_WS}/exec?token={self.client.jwt}&id={exec_id}&endpointId={node.id}"
         return ExecSession(ws_url)

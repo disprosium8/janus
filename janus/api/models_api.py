@@ -53,9 +53,9 @@ class ActiveQuery(BaseModel):
 
 
 class LogQuery(BaseModel):
-    timestamps: Optional[int] = Field(0, description="Include timestamps in logs")
-    stderr: Optional[int] = Field(1, description="Include stderr in logs")
-    stdout: Optional[int] = Field(1, description="Include stdout in logs")
+    timestamps: Optional[bool] = Field(False, description="Include timestamps in logs")
+    stderr: Optional[bool] = Field(True, description="Include stderr in logs")
+    stdout: Optional[bool] = Field(True, description="Include stdout in logs")
     since: Optional[int] = Field(0, description="Return logs since this timestamp")
     tail: Optional[int] = Field(
         100, description="Number of lines to return from the end of the log"
@@ -69,6 +69,10 @@ class InterfaceQuery(BaseModel):
 
 class TuneRequest(BaseModel):
     config: dict
+
+
+class NodeQuery(BaseModel):
+    refresh: Optional[bool] = Field(False, description="Refresh nodes from backends")
 
 
 # Path Models for Flask-OpenAPI3

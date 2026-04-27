@@ -18,6 +18,7 @@ from janus.api.models_api import (
     ExecRequest,
     LogQuery,
     ActiveQuery,
+    NodeQuery,
     LogPath,
     ActivePath,
     NodePath,
@@ -100,9 +101,9 @@ def get_logs(path: LogPath, query: LogQuery):
             return {"error": "Not found"}, 404
         if nname:
             try:
-                ts = query.timestamps
-                stderr = query.stderr
-                stdout = query.stdout
+                ts = int(query.timestamps) if query.timestamps is not None else 0
+                stderr = int(query.stderr) if query.stderr is not None else 1
+                stdout = int(query.stdout) if query.stdout is not None else 1
                 since = query.since
                 tail = query.tail
                 svc = res["services"][nname]
@@ -173,11 +174,15 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
 
 @api.get("/nodes", summary="Get nodes")
 @httpauth.login_required
-def get_nodes():
+def get_nodes(query: NodeQuery):
     """
     List all nodes.
     """
-    (user, group) = get_authinfo(request)
+    if query.refresh:
+        from janus.api.db import init_db
+
+        init_db(refresh=True)
+
     dbase = cfg.db
     table = dbase.get_table("nodes")
     return jsonify(dbase.all(table))
@@ -210,11 +215,12 @@ def add_node(body: AddEndpointRequest):
     from janus.api.manager import ServiceManagerException
 
     try:
-        req = body.model_dump()
-        return jsonify(cfg.sm.add_endpoint(req))
+        log.debug(f"Adding node with body: {body.model_dump()}")
+        return jsonify(cfg.sm.add_node(body))
     except ServiceManagerException as e:
         raise BadRequest(f"Adding endpoint failed: {e}")
     except Exception as e:
+        log.exception(f"Unexpected error adding node: {e}")
         raise InternalServerError(f"Adding endpoint failed: {e}")
 
 
@@ -248,7 +254,6 @@ def create_sessions(body: SessionRequestList):
     req = body.root
     req = [r.model_dump() for r in req]
 
-    log.debug(req)
     from janus.api.session_manager import (
         SessionManager,
         InvalidSessionRequestException,
@@ -360,7 +365,10 @@ def exec_command(body: ExecRequest):
     try:
         handler = cfg.sm.get_handler(nname=nname)
         n = Node(**node)
-        return jsonify(handler.exec_command(n, container, kwargs, start))
+        ret = handler.exec_create(n, container, **kwargs)
+        if start:
+            handler.exec_start(n, ret)
+        return jsonify(ret)
     except Exception as e:
         return jsonify({"error": f"Could not execute command: {e}"}), 500
 
@@ -413,11 +421,12 @@ def _handle_get_profiles(resource, query, rname=None):
         res = cfg.pm.get_profile(resource, rname, user, group, inline=True)
         if not res:
             return {"error": f"Profile not found: {rname}"}, 404
-        return jsonify(res.dict())
+        return jsonify(res.model_dump())
     else:
-        log.debug("Returning all profiles")
+        log.debug(f"Returning all profiles for resource: {resource}")
         ret = [
-            p.dict() for p in cfg.pm.get_profiles(resource, user, group, inline=True)
+            p.model_dump()
+            for p in cfg.pm.get_profiles(resource, user, group, inline=True)
         ]
         return jsonify(ret if ret else list())
 
@@ -499,7 +508,61 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     except Exception as e:
         return str(e), 500
 
-    return jsonify(cfg.pm.get_profile(resource, rname).dict()), 200
+    return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
+
+
+@api.put("/profiles/<path:resource>/<path:rname>", summary="Update a profile")
+@httpauth.login_required
+def put_profile(path: ProfileFullByPath, body: ProfileRequest):
+    """
+    Update an existing profile.
+    """
+    resource = path.resource
+    rname = path.rname
+    resources = [Constants.HOST, Constants.NET, Constants.VOL, Constants.QOS]
+
+    try:
+        if not resource or resource not in resources:
+            return {"error": f"Invalid resource path: {resource}"}, 404
+
+        configs = body.settings
+        res = cfg.pm.get_profile(resource, rname, inline=True)
+        if not res:
+            return {"error": f"Profile {rname} not found!"}, 404
+
+        if resource == Constants.HOST:
+            default = cfg._base_profile.copy()
+        elif resource == Constants.VOL:
+            default = cfg._base_volumes.copy()
+        elif resource == Constants.NET:
+            default = cfg._base_networks.copy()
+        else:
+            default = {}
+
+        default.update((k, configs[k]) for k in default.keys() & configs.keys())
+        prof = {"name": rname, "settings": default}
+        if resource == Constants.HOST:
+            ContainerProfile(**prof)
+        elif resource == Constants.VOL:
+            VolumeProfile(**prof)
+        elif resource == Constants.NET:
+            NetworkProfile(**prof)
+
+    except ValidationError as e:
+        return str(e), 400
+    except Exception as e:
+        return str(e), 500
+
+    try:
+        tbl = cfg.db.get_table(resource)
+        record = {"name": rname, "settings": default}
+        cfg.db.update(tbl, record, name=rname)
+        log.info(f"Updated {rname}")
+        cfg.pm.read_profiles(refresh=True)
+    except Exception as e:
+        return str(e), 500
+
+    return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
 
 @api.delete("/profiles/<path:resource>/<path:rname>", summary="Remove a profile")

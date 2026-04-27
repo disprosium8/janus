@@ -51,6 +51,10 @@ def parse_config(fpath):
         cfg.PORTAINER_WS = str(config.get("PORTAINER_WS", None))
         cfg.PORTAINER_USER = str(config.get("PORTAINER_USER", None))
         cfg.PORTAINER_PASSWORD = str(config.get("PORTAINER_PASSWORD", None))
+        pw = cfg.PORTAINER_PASSWORD
+        log.debug(
+            f"Parsed Portainer Config: URI={cfg.PORTAINER_URI}, USER={cfg.PORTAINER_USER}, PW_LEN={len(pw) if pw else 0}"
+        )
         vssl = str(config.get("PORTAINER_VERIFY_SSL", True))
         if vssl == "False":
             cfg.PORTAINER_VERIFY_SSL = False
@@ -177,7 +181,7 @@ def main():
             # Save handles to these in our global config class
             cfg.setdb(db, pm, sm)
             # Read all profiles at startup
-            cfg.pm.read_profiles()
+            cfg.pm.read_profiles(refresh=True)
         except Exception as e:
             import traceback
 
