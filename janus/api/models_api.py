@@ -50,6 +50,9 @@ class ActiveQuery(BaseModel):
     fields: Optional[str] = Field(
         None, description="Comma separated list of fields to return"
     )
+    force: Optional[bool] = Field(
+        False, description="Force deletion of session"
+    )
 
 
 class LogQuery(BaseModel):
@@ -73,11 +76,21 @@ class TuneRequest(BaseModel):
 
 class NodeQuery(BaseModel):
     refresh: Optional[bool] = Field(False, description="Refresh nodes from backends")
+    fields: Optional[str] = Field(None, description="Comma separated list of fields to return")
 
 
 class ProfileQuery(BaseModel):
     refresh: Optional[bool] = Field(False, description="Refresh profiles from files")
     reset: Optional[bool] = Field(False, description="Reset database tables")
+    fields: Optional[str] = Field(None, description="Comma separated list of fields to return")
+
+
+class ImageQuery(BaseModel):
+    fields: Optional[str] = Field(None, description="Comma separated list of fields to return")
+
+
+class AuthQuery(BaseModel):
+    fields: Optional[str] = Field(None, description="Comma separated list of fields to return")
 
 
 # Path Models for Flask-OpenAPI3

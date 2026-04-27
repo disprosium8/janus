@@ -20,6 +20,8 @@ from janus.api.models_api import (
     ActiveQuery,
     NodeQuery,
     ProfileQuery,
+    ImageQuery,
+    AuthQuery,
     LogPath,
     ActivePath,
     NodePath,
@@ -37,6 +39,18 @@ from janus.settings import cfg
 # Basic auth
 httpauth = HTTPBasicAuth()
 log = logging.getLogger(__name__)
+
+
+def filter_fields(res, fields: Optional[str]):
+    if not fields or not res:
+        return res
+    fields_list = fields.split(",")
+    if isinstance(res, list):
+        return [{k: v for k, v in r.items() if k in fields_list} for r in res if r]
+    elif isinstance(res, dict):
+        return {k: v for k, v in res.items() if k in fields_list}
+    return res
+
 
 tag = Tag(
     name="janus/controller",
@@ -140,14 +154,7 @@ def get_active(query: ActiveQuery):
     else:
         res = dbase.all(table)
 
-    if fields:
-        ret = list()
-        for r in res:
-            if not r:
-                continue
-            ret.append({k: v for k, v in r.items() if k in fields.split(",")})
-        return jsonify(ret)
-    return jsonify(res)
+    return jsonify(filter_fields(res, fields))
 
 
 @api.get("/active/<int:aid>", summary="Get a specific active session")
@@ -168,11 +175,36 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
         res = dbase.get(table, query=q)
         if not res:
             return {"error": "Not found"}, 404
-        if fields:
-            return jsonify({k: v for k, v in res.items() if k in fields.split(",")})
-        else:
-            return jsonify(res)
+        return jsonify(filter_fields(res, fields))
     return {"error": "Not found"}, 404
+
+
+@api.delete("/active/<int:aid>", summary="Delete a specific active session")
+@httpauth.login_required
+def delete_active(path: ActivePath, query: ActiveQuery):
+    """
+    Delete a session by id.
+    """
+    aid = path.aid
+    (user, group) = get_authinfo(request)
+
+    from janus.api.session_manager import (
+        SessionManager,
+        ResourceNotFoundException,
+        SessionManagerException,
+    )
+
+    try:
+        force = query.force
+        session_manager = SessionManager()
+        session_manager.delete(aid, force, user, group)
+        return "", 204
+    except ResourceNotFoundException as e:
+        raise NotFound(f"Deleting session failed: {e}")
+    except SessionManagerException as e:
+        raise InternalServerError(f"Deleting session failed: {e}")
+    except Exception as e:
+        raise InternalServerError(f"Deleting session failed: FATAL: {type(e)}: {e}")
 
 
 @api.get("/nodes", summary="Get nodes")
@@ -186,9 +218,19 @@ def get_nodes(query: NodeQuery):
 
         init_db(refresh=True)
 
+    (user, group) = get_authinfo(request)
+    quser = QueryUser()
+    q = quser.query_builder(user, group, {})
+    fields = query.fields
+
     dbase = cfg.db
     table = dbase.get_table("nodes")
-    return jsonify(dbase.all(table))
+
+    if q:
+        res = dbase.search(table, query=q)
+    else:
+        res = dbase.all(table)
+    return jsonify(filter_fields(res, fields))
 
 
 @api.get("/nodes/<node>", summary="Get node by name")
@@ -197,12 +239,14 @@ def get_nodes(query: NodeQuery):
 def get_node_by_id_or_name(path: NodePath):
     node = path.node
     node_id = path.id
+    (user, group) = get_authinfo(request)
+    quser = QueryUser()
+    q = quser.query_builder(user, group, {"id": node_id, "name": node})
+
     dbase = cfg.db
     table = dbase.get_table("nodes")
-    if node:
-        res = dbase.get(table, name=node)
-    else:
-        res = dbase.get(table, id=node_id)
+    res = dbase.get(table, query=q)
+
     if not res:
         return {"error": "Not found"}, 404
     return jsonify(res)
@@ -230,17 +274,31 @@ def add_node(body: AddEndpointRequest):
 @api.delete("/nodes/<node>", summary="Delete node by name")
 @api.delete("/nodes/<int:id>", summary="Delete node by ID")
 @httpauth.login_required
-@admin_required
 def delete_node(path: NodePath):
+    """
+    Deletes a node (endpoint).
+    """
     node = path.node
     node_id = path.id
+    
+    (user, group) = get_authinfo(request)
+    quser = QueryUser()
+    q = quser.query_builder(user, group, {"id": node_id, "name": node})
+    
+    dbase = cfg.db
+    table = dbase.get_table("nodes")
+    doc = dbase.get(table, query=q)
+    if doc is None:
+        return {"error": "Not found"}, 404
+
     from janus.api.manager import ServiceManagerException
 
     try:
         if node:
-            return jsonify(cfg.sm.delete_endpoint(name=node))
+            cfg.sm.delete_endpoint(name=node)
         else:
-            return jsonify(cfg.sm.delete_endpoint(id=node_id))
+            cfg.sm.delete_endpoint(id=node_id)
+        return "", 204
     except ServiceManagerException as e:
         raise BadRequest(f"Deleting endpoint failed: {e}")
     except Exception as e:
@@ -379,19 +437,28 @@ def exec_command(body: ExecRequest):
 @api.get("/images", summary="Get images")
 @api.get("/images/<path:name>", summary="Get a specific image")
 @httpauth.login_required
-def get_images(path: ImagePath):
+def get_images(path: ImagePath, query: ImageQuery):
     """
     List all images or a specific image.
     """
     name = path.name
+    (user, group) = get_authinfo(request)
+    quser = QueryUser()
+    q = quser.query_builder(user, group, {"name": name})
+    
     dbase = cfg.db
     table = dbase.get_table("images")
     if name:
-        res = dbase.get(table, name=name)
+        res = dbase.get(table, query=q)
         if not res:
             return {"error": "Not found"}, 404
-        return jsonify(res)
-    return jsonify(dbase.all(table))
+        return jsonify(filter_fields(res, query.fields))
+    else:
+        if q:
+            res = dbase.search(table, query=q)
+        else:
+            res = dbase.all(table)
+        return jsonify(filter_fields(res, query.fields))
 
 
 def _handle_get_profiles(resource, query, rname=None):
@@ -612,7 +679,7 @@ RESOURCE_DB_MAP = {
 @api.get("/auth/<path:resource>/<int:rid>", summary="Get specific auth info by ID")
 @api.get("/auth/<path:resource>/<path:rname>", summary="Get specific auth info by name")
 @httpauth.login_required
-def get_auth(path: AuthPath):
+def get_auth(path: AuthPath, query: AuthQuery):
     """
     Get user and group attributes for a named resource.
     """
@@ -628,21 +695,21 @@ def get_auth(path: AuthPath):
 
     (user, group) = get_authinfo(request)
     quser = QueryUser()
-    query = quser.query_builder(user, group, {"id": rid, "name": rname})
+    q = quser.query_builder(user, group, {"id": rid, "name": rname})
     
-    if not query:
+    if not q:
         return {"error": "Must specify resource id or name"}, 400
         
     dbase = cfg.db
     table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
-    res = dbase.get(table, query=query)
+    res = dbase.get(table, query=q)
     
     if not res:
         return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
         
     users = res.get("users", list())
     groups = res.get("groups", list())
-    return {"users": users, "groups": groups}, 200
+    return jsonify(filter_fields({"users": users, "groups": groups}, query.fields))
 
 
 @api.post("/auth/<path:resource>/<int:rid>", summary="Update auth info by ID")
