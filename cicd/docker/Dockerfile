@@ -9,11 +9,15 @@ RUN apt-get update && apt-get -u -y install lsb-release python3 binutils python3
     && curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl \
     && chmod +x kubectl && mv kubectl /usr/local/bin/
 
-COPY /cicd/docker/requirements.txt /
+# Install dependencies from root requirements.txt
+COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir --break-system-packages --ignore-requires-python --use-pep517 -r /requirements.txt \
-   && pip install --no-cache-dir --break-system-packages --ignore-requires-python --use-pep517 coverage
+   && pip install --no-cache-dir --break-system-packages --ignore-requires-python --use-pep517 coverage pytest-cov
 
-COPY ./setup.py ./README.md ./MANIFEST.in /
+# Copy project files
+COPY ./pyproject.toml ./README.md ./MANIFEST.in /
 COPY ./janus /janus
 COPY ./tests /tests
-RUN python3 -m pip install --break-system-packages --no-cache-dir --use-pep517 .
+
+# Install the project in editable mode or normally
+RUN python3 -m pip install --break-system-packages --no-cache-dir --use-pep517 ".[swagger,scalar]"

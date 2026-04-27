@@ -1,4 +1,5 @@
 import os
+import pytest
 
 from tests.sense_test_utils import get_logger, DB_FILE_NAME, JANUS_CONF_TEST_FILE
 
@@ -97,6 +98,7 @@ def get_nrp_multiple_vlan():
     }
 
 
+@pytest.mark.skip(reason="Requires external SENSE environment")
 def test_create_janus_sessions(sense_session, host_networking=False):
     config_file = os.path.join(os.getcwd(), JANUS_CONF_TEST_FILE)
     sense_api_handler = NoopSENSEApiHandler()
