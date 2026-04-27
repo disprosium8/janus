@@ -1,10 +1,8 @@
 import logging
-from typing import Optional
-from pydantic import ValidationError
 from janus import settings
 from janus.settings import cfg
 
-from flask import request, jsonify
+from flask import jsonify
 from flask_openapi3 import APIBlueprint, Tag
 from flask_httpauth import HTTPBasicAuth
 from werkzeug.security import check_password_hash
@@ -25,8 +23,11 @@ httpauth = HTTPBasicAuth()
 log = logging.getLogger(__name__)
 
 tag = Tag(name="janus/agent", description="Operations for node tuning")
-api_prefix = getattr(settings, 'API_PREFIX', '') or ''
-api = APIBlueprint('agent', __name__, url_prefix=api_prefix + '/janus/agent', abp_tags=[tag])
+api_prefix = getattr(settings, "API_PREFIX", "") or ""
+api = APIBlueprint(
+    "agent", __name__, url_prefix=api_prefix + "/janus/agent", abp_tags=[tag]
+)
+
 
 @httpauth.error_handler
 def auth_error(status):
@@ -36,56 +37,55 @@ def auth_error(status):
 @httpauth.verify_password
 def verify_password(username, password):
     users = cfg.get_users()
-    if username in users and \
-            check_password_hash(users.get(username), password):
+    if username in users and check_password_hash(users.get(username), password):
         return username
 
 
-@api.get('/node', summary="Returns static node resources")
+@api.get("/node", summary="Returns static node resources")
 def get_node():
     """
     Returns static node resources
     """
     ret = dict()
     try:
-        ret['cpu'] = build_cpu()
+        ret["cpu"] = build_cpu()
     except Exception as e:
         log.warning(f"Could not build CPU info: {e}")
-        ret['cpu'] = {}
-        
+        ret["cpu"] = {}
+
     try:
-        ret['mem'] = build_mem()
+        ret["mem"] = build_mem()
     except Exception as e:
         log.warning(f"Could not build MEM info: {e}")
-        ret['mem'] = {}
-        
+        ret["mem"] = {}
+
     try:
-        ret['numa'] = build_numa()
+        ret["numa"] = build_numa()
     except Exception as e:
         log.warning(f"Could not build NUMA info: {e}")
-        ret['numa'] = {}
-        
+        ret["numa"] = {}
+
     try:
-        ret['sriov'] = build_sriov()
+        ret["sriov"] = build_sriov()
     except Exception as e:
         log.warning(f"Could not build SRIOV info: {e}")
-        ret['sriov'] = {}
-        
+        ret["sriov"] = {}
+
     try:
-        ret['block'] = build_block()
+        ret["block"] = build_block()
     except Exception as e:
         log.warning(f"Could not build BLOCK info: {e}")
-        ret['block'] = {}
+        ret["block"] = {}
 
     return jsonify(ret), 200
 
 
-@api.get('/tune', summary="Get node tuning settings")
+@api.get("/tune", summary="Get node tuning settings")
 def get_tune_endpoint():
     return jsonify(get_tune())
 
 
-@api.post('/tune', summary="Set node tuning settings")
+@api.post("/tune", summary="Set node tuning settings")
 @httpauth.login_required
 def post_tune_endpoint(body: TuneRequest):
     try:
@@ -95,7 +95,7 @@ def post_tune_endpoint(body: TuneRequest):
     return jsonify(ret), 200
 
 
-@api.get('/tc/netem', summary="Get netem rules")
+@api.get("/tc/netem", summary="Get netem rules")
 def get_tc_netem(query: InterfaceQuery):
     iface = query.interface
     container = query.container
@@ -111,7 +111,7 @@ def get_tc_netem(query: InterfaceQuery):
     return jsonify(response), 200
 
 
-@api.post('/tc/netem', summary="Set netem rules")
+@api.post("/tc/netem", summary="Set netem rules")
 @httpauth.login_required
 def post_tc_netem(body: QoS_Agent):
     default = {
@@ -124,15 +124,15 @@ def post_tc_netem(body: QoS_Agent):
         "limit": None,
         "dport": None,
         "ip": None,
-        "container": None
+        "container": None,
     }
 
     try:
         req = body.model_dump()
         log.info(req)
 
-        iface = req.get('interface', None)
-        container = req.get('container', None)
+        iface = req.get("interface", None)
+        container = req.get("container", None)
 
         if iface is None and container is None:
             return "No interface or container id specified", 400
@@ -150,15 +150,15 @@ def post_tc_netem(body: QoS_Agent):
     return jsonify(ret), 200
 
 
-@api.delete('/tc/netem', summary="Delete netem rules")
+@api.delete("/tc/netem", summary="Delete netem rules")
 @httpauth.login_required
 def delete_tc_netem(body: TuneRequest):
     try:
         req = body.config
         log.info(req)
 
-        iface = req.get('interface', None)
-        container = req.get('container', None)
+        iface = req.get("interface", None)
+        container = req.get("container", None)
 
         if iface is None and container is None:
             return "No interface or container id specified", 400
@@ -173,7 +173,7 @@ def delete_tc_netem(body: TuneRequest):
     return jsonify(ret), 200
 
 
-@api.get('/tc/delay', summary="Get delay rules")
+@api.get("/tc/delay", summary="Get delay rules")
 def get_tc_delay(query: InterfaceQuery):
     iface = query.interface
     if iface is None:
@@ -181,19 +181,20 @@ def get_tc_delay(query: InterfaceQuery):
     return jsonify(get_eth_iface_rules(iface))
 
 
-@api.post('/tc/delay', summary="Set delay rules")
+@api.post("/tc/delay", summary="Set delay rules")
 @httpauth.login_required
 def post_tc_delay(body: TuneRequest):
-    default = { "interface"  : None,
-            "latency"    : None,
-            "loss"       : None,
-            "dport"      : None,
-            "dmask"      : None,
-            "id"         : None,
-            "maxrate"    : None,
-            "ip"         : None,
-            "type"       : None,
-            }
+    default = {
+        "interface": None,
+        "latency": None,
+        "loss": None,
+        "dport": None,
+        "dmask": None,
+        "id": None,
+        "maxrate": None,
+        "ip": None,
+        "type": None,
+    }
     try:
         req = body.config
         log.info(req)
@@ -211,7 +212,7 @@ def post_tc_delay(body: TuneRequest):
     return jsonify(ret), 200
 
 
-@api.get('/tc/latency', summary="Get latency rules")
+@api.get("/tc/latency", summary="Get latency rules")
 def get_tc_latency(query: InterfaceQuery):
     iface = query.interface
     if iface is None:
@@ -219,19 +220,20 @@ def get_tc_latency(query: InterfaceQuery):
     return jsonify(get_eth_iface_rules(iface))
 
 
-@api.post('/tc/latency', summary="Set latency rules")
+@api.post("/tc/latency", summary="Set latency rules")
 @httpauth.login_required
 def post_tc_latency(body: TuneRequest):
-    default = { "interface"  : None,
-            "latency"    : None,
-            "loss"       : None,
-            "dport"      : None,
-            "dmask"      : None,
-            "id"         : None,
-            "maxrate"    : None,
-            "ip"         : None,
-            "type"       : None,
-            }
+    default = {
+        "interface": None,
+        "latency": None,
+        "loss": None,
+        "dport": None,
+        "dmask": None,
+        "id": None,
+        "maxrate": None,
+        "ip": None,
+        "type": None,
+    }
     try:
         req = body.config
         log.info(req)
@@ -249,7 +251,7 @@ def post_tc_latency(body: TuneRequest):
     return jsonify(ret), 200
 
 
-@api.get('/tc/filter', summary="Get filter rules")
+@api.get("/tc/filter", summary="Get filter rules")
 def get_tc_filter(query: InterfaceQuery):
     iface = query.interface
     if iface is None:
@@ -257,7 +259,7 @@ def get_tc_filter(query: InterfaceQuery):
     return jsonify(get_eth_iface_rules(iface))
 
 
-@api.post('/tc/filter', summary="Set filter rules")
+@api.post("/tc/filter", summary="Set filter rules")
 @httpauth.login_required
 def post_tc_filter(body: TuneRequest):
     try:
@@ -273,7 +275,7 @@ def post_tc_filter(body: TuneRequest):
     return jsonify(ret), 200
 
 
-@api.get('/tc/pacing', summary="Get pacing rules")
+@api.get("/tc/pacing", summary="Get pacing rules")
 def get_tc_pacing(query: InterfaceQuery):
     iface = query.interface
     if iface is None:
@@ -281,26 +283,26 @@ def get_tc_pacing(query: InterfaceQuery):
     return jsonify(get_eth_iface_rules(iface))
 
 
-@api.post('/tc/pacing', summary="Set pacing rules")
+@api.post("/tc/pacing", summary="Set pacing rules")
 @httpauth.login_required
 def post_tc_pacing(body: TuneRequest):
     try:
         req = body.config
         log.debug(req)
-        ret = Pacing(req)
+        Pacing(req)
     except Exception as e:
         return str(e), 500
     else:
         return "OK", 200
 
 
-@api.delete('/tc/pacing', summary="Delete pacing rules")
+@api.delete("/tc/pacing", summary="Delete pacing rules")
 @httpauth.login_required
 def delete_tc_pacing(body: TuneRequest):
     try:
         req = body.config
         log.debug(req)
-        ret = Pacing(req, delete=True)
+        Pacing(req, delete=True)
     except Exception as e:
         return str(e), 500
     return "OK", 200

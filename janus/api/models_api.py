@@ -20,6 +20,7 @@ class SessionRequest(BaseModel):
     kwargs: Optional[dict] = dict()
     overrides: Optional[dict] = dict()
 
+
 # Helper for list of requests
 class SessionRequestList(RootModel):
     root: List[SessionRequest]
@@ -46,7 +47,9 @@ class AuthRequest(BaseModel):
 
 # Query Models for Flask-OpenAPI3
 class ActiveQuery(BaseModel):
-    fields: Optional[str] = Field(None, description="Comma separated list of fields to return")
+    fields: Optional[str] = Field(
+        None, description="Comma separated list of fields to return"
+    )
 
 
 class LogQuery(BaseModel):
@@ -54,7 +57,9 @@ class LogQuery(BaseModel):
     stderr: Optional[int] = Field(1, description="Include stderr in logs")
     stdout: Optional[int] = Field(1, description="Include stdout in logs")
     since: Optional[int] = Field(0, description="Return logs since this timestamp")
-    tail: Optional[int] = Field(100, description="Number of lines to return from the end of the log")
+    tail: Optional[int] = Field(
+        100, description="Number of lines to return from the end of the log"
+    )
 
 
 class InterfaceQuery(BaseModel):
@@ -87,6 +92,7 @@ class ImagePath(BaseModel):
 
 class ProfileResourcePath(BaseModel):
     resource: str = Field(..., description="Resource type (e.g., host, net, vol, qos)")
+
 
 class ProfileFullByPath(BaseModel):
     resource: str = Field(..., description="Resource type")

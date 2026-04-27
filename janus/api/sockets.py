@@ -3,7 +3,7 @@ import logging
 from threading import Thread
 
 from janus.settings import cfg
-from janus.api.constants import WSType, EPType
+from janus.api.constants import WSType
 from janus.api.models_ws import WSExecStream, EdgeAgentRegister
 from janus.api.models import Node
 from janus.api.pubsub import Subscriber, TOPIC
@@ -59,6 +59,7 @@ def handle_websocket(sock):
             log.info(f"Added edge {peer}: {req.name}")
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             log.error(f"Severe error add edge from {peer}: {e}")
             sock.send(json.dumps({"error": f"Controller in trouble: {e}"}))
@@ -68,14 +69,16 @@ def handle_websocket(sock):
         while edge_handle.sock.connected and edge_handle.active:
             time.sleep(1)
 
-        log.warning(f"AGENT_REGISTER:inactive edge handle{peer}: {edge_handle.sock.connected}:{edge_handle.active}")
+        log.warning(
+            f"AGENT_REGISTER:inactive edge handle{peer}: {edge_handle.sock.connected}:{edge_handle.active}"
+        )
         return
 
     if typ == WSType.EVENTS:
         peer = sock.sock.getpeername()
         log.debug(f"Got event stream request from {peer}")
         sub = Subscriber(peer)
-        res = cfg.sm.pubsub.subscribe(sub, TOPIC.event_stream)
+        cfg.sm.pubsub.subscribe(sub, TOPIC.event_stream)
         while True:
             r = sub.read()
             if r.get("eof"):
@@ -86,7 +89,9 @@ def handle_websocket(sock):
         log.debug(f"Got exec stream request from {sock.sock.getpeername()}")
         req = WSExecStream(**js)
         handler = cfg.sm.get_handler(nname=req.node)
-        session = handler.exec_stream(Node(id=req.node_id, name=req.node), req.container, req.exec_id)
+        session = handler.exec_stream(
+            Node(id=req.node_id, name=req.node), req.container, req.exec_id
+        )
         receive_queue = session.receive_queue
         send_queue = session.send_queue
 

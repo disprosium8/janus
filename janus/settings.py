@@ -1,15 +1,13 @@
 import os
-import profile
 import logging
-from functools import reduce
 from werkzeug.security import generate_password_hash
 
 
-API_PREFIX = '/api'
+API_PREFIX = "/api"
 DEFAULT_CFG_PATH = "/etc/janus/janus.conf"
 DEFAULT_PROFILE_PATH = "/etc/janus/profiles"
 DEFAULT_DB_PATH = "/etc/janus/db.json"
-#LOG_CFG_PATH = "/etc/janus/logging.conf"
+# LOG_CFG_PATH = "/etc/janus/logging.conf"
 IGNORE_EPS = []
 AGENT_PORT = 5050
 AGENT_PROTO = "https"
@@ -21,24 +19,19 @@ AGENT_AUTO_TUNE = True
 log = logging.getLogger(__name__)
 
 try:
-    FLASK_DEBUG = os.environ['DEBUG']
-except:
+    FLASK_DEBUG = os.environ["DEBUG"]
+except Exception:
     FLASK_DEBUG = False
 
-DEFAULT_PROFILE = 'default'
-DEFAULT_NET_PROFILES = ['bridge', 'host', 'none']
-SUPPORTED_FEATURES = ['rdma']
-SUPPORTED_IMAGES = ['dtnaas/tools',
-                    'dtnaas/ofed']
+DEFAULT_PROFILE = "default"
+DEFAULT_NET_PROFILES = ["bridge", "host", "none"]
+SUPPORTED_FEATURES = ["rdma"]
+SUPPORTED_IMAGES = ["dtnaas/tools", "dtnaas/ofed"]
 
-REGISTRIES = {
-    "wharf.es.net": {
-        "auth": os.getenv("REGISTRY_AUTH")
-    }
-}
+REGISTRIES = {"wharf.es.net": {"auth": os.getenv("REGISTRY_AUTH")}}
 
 
-class JanusConfig():
+class JanusConfig:
     def __init__(self):
         self._db = None
         self._pm = None
@@ -62,19 +55,16 @@ class JanusConfig():
         else:
             self._users = {
                 "admin": generate_password_hash("admin"),
-                "kissel": generate_password_hash("kissel")
+                "kissel": generate_password_hash("kissel"),
             }
 
         self._features = {
-            'rdma': {
-                'devices': [
-                    {
-                        'devprefix': '/dev/infiniband',
-                        'names': ['rdma_cm', 'uverbs']
-                    }
+            "rdma": {
+                "devices": [
+                    {"devprefix": "/dev/infiniband", "names": ["rdma_cm", "uverbs"]}
                 ],
-                'caps': ['IPC_LOCK'],
-                'limits': [{"Name": "memlock", "Soft": -1, "Hard": -1}]
+                "caps": ["IPC_LOCK"],
+                "limits": [{"Name": "memlock", "Soft": -1, "Hard": -1}],
             }
         }
 
@@ -91,7 +81,7 @@ class JanusConfig():
             "mode": None,
             "enable_ipv6": False,
             "ipam": dict(),
-            "options": dict()
+            "options": dict(),
         }
         self._qos = dict()
         self._profiles = dict()
@@ -122,8 +112,8 @@ class JanusConfig():
             "qos": None,
             "tools": {
                 "dtnaas/tools": ["iperf3", "iperf3_server", "escp", "xfer_test"],
-                "dtnaas/ofed": ["iperf3", "iperf3_server", "ib_write_bw", "xfer_test"]
-            }
+                "dtnaas/ofed": ["iperf3", "iperf3_server", "ib_write_bw", "xfer_test"],
+            },
         }
 
     @property
@@ -153,7 +143,7 @@ class JanusConfig():
     @property
     def plugins(self):
         return self._plugins
-    
+
     def setdb(self, db, pm, sm):
         self._db = db
         self._pm = pm

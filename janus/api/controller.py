@@ -1,6 +1,6 @@
 import logging
 from functools import wraps
-from typing import List, Union, Optional
+from typing import Optional
 
 from flask import request, jsonify, abort
 from flask_httpauth import HTTPBasicAuth
@@ -10,19 +10,12 @@ from werkzeug.exceptions import BadRequest, NotFound, InternalServerError
 from werkzeug.security import check_password_hash
 
 from janus.api.db import QueryUser
-from janus.api.models import (
-    Node,
-    ContainerProfile,
-    NetworkProfile,
-    VolumeProfile
-)
+from janus.api.models import Node, ContainerProfile, NetworkProfile, VolumeProfile
 from janus.api.models_api import (
     AddEndpointRequest,
-    SessionRequest,
     SessionRequestList,
     ProfileRequest,
     ExecRequest,
-    AuthRequest,
     LogQuery,
     ActiveQuery,
     LogPath,
@@ -33,9 +26,7 @@ from janus.api.models_api import (
     ProfileFullByPath,
     AuthPath,
 )
-from janus.api.utils import (
-    Constants
-)
+from janus.api.constants import Constants
 from janus import settings
 from janus.settings import cfg
 
@@ -43,9 +34,14 @@ from janus.settings import cfg
 httpauth = HTTPBasicAuth()
 log = logging.getLogger(__name__)
 
-tag = Tag(name="janus/controller", description="Operations for Janus on-demand container provisioning")
-api_prefix = getattr(settings, 'API_PREFIX', '') or ''
-api = APIBlueprint('controller', __name__, url_prefix=api_prefix + '/janus/controller', abp_tags=[tag])
+tag = Tag(
+    name="janus/controller",
+    description="Operations for Janus on-demand container provisioning",
+)
+api_prefix = getattr(settings, "API_PREFIX", "") or ""
+api = APIBlueprint(
+    "controller", __name__, url_prefix=api_prefix + "/janus/controller", abp_tags=[tag]
+)
 
 
 @httpauth.error_handler
@@ -56,25 +52,25 @@ def auth_error(status):
 @httpauth.verify_password
 def verify_password(username, password):
     users = cfg.get_users()
-    if username in users and \
-       check_password_hash(users.get(username), password):
+    if username in users and check_password_hash(users.get(username), password):
         return username
 
 
 def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not httpauth.current_user() == 'admin':
+        if not httpauth.current_user() == "admin":
             abort(403)
         return f(*args, **kwargs)
+
     return wrapper
 
 
 def get_authinfo(request):
     api_user = httpauth.current_user()
-    if api_user == 'admin':
-        user = request.args.get('user', None)
-        group = request.args.get('group', None)
+    if api_user == "admin":
+        user = request.args.get("user", None)
+        group = request.args.get("group", None)
     else:
         user = api_user
         group = None
@@ -82,7 +78,10 @@ def get_authinfo(request):
     return (user, group)
 
 
-@api.get('/active/<int:aid>/logs/<path:nname>', summary="Display logs for a specific active session and node.")
+@api.get(
+    "/active/<int:aid>/logs/<path:nname>",
+    summary="Display logs for a specific active session and node.",
+)
 @httpauth.login_required
 def get_logs(path: LogPath, query: LogQuery):
     """
@@ -94,7 +93,7 @@ def get_logs(path: LogPath, query: LogQuery):
     quser = QueryUser()
     q = quser.query_builder(user, group, {"id": aid})
     dbase = cfg.db
-    table = dbase.get_table('active')
+    table = dbase.get_table("active")
     if q and aid:
         res = dbase.get(table, query=q)
         if not res:
@@ -106,19 +105,20 @@ def get_logs(path: LogPath, query: LogQuery):
                 stdout = query.stdout
                 since = query.since
                 tail = query.tail
-                svc = res['services'][nname]
-                cid = svc[0]['container_id']
-                n = Node(id=svc[0]['node_id'], name=nname)
+                svc = res["services"][nname]
+                cid = svc[0]["container_id"]
+                n = Node(id=svc[0]["node_id"], name=nname)
                 handler = cfg.sm.get_handler(nname=nname)
                 return handler.get_logs(n, cid, since, stderr, stdout, tail, ts)
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
                 return {"error": f"Could not retrieve container logs: {e}"}, 500
     return {"error": "Not found"}, 404
 
 
-@api.get('/active', summary="Get all active sessions")
+@api.get("/active", summary="Get all active sessions")
 @httpauth.login_required
 def get_active(query: ActiveQuery):
     """
@@ -129,24 +129,24 @@ def get_active(query: ActiveQuery):
     q = quser.query_builder(user, group, {})
     fields = query.fields
     dbase = cfg.db
-    table = dbase.get_table('active')
-    
+    table = dbase.get_table("active")
+
     if q:
         res = dbase.search(table, query=q)
     else:
         res = dbase.all(table)
-        
+
     if fields:
         ret = list()
         for r in res:
             if not r:
                 continue
-            ret.append({k: v for k, v in r.items() if k in fields.split(',')})
+            ret.append({k: v for k, v in r.items() if k in fields.split(",")})
         return jsonify(ret)
     return jsonify(res)
 
 
-@api.get('/active/<int:aid>', summary="Get a specific active session")
+@api.get("/active/<int:aid>", summary="Get a specific active session")
 @httpauth.login_required
 def get_active_by_id(path: ActivePath, query: ActiveQuery):
     """
@@ -158,20 +158,20 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
     q = quser.query_builder(user, group, {"id": aid})
     fields = query.fields
     dbase = cfg.db
-    table = dbase.get_table('active')
-    
+    table = dbase.get_table("active")
+
     if q and aid:
         res = dbase.get(table, query=q)
         if not res:
             return {"error": "Not found"}, 404
         if fields:
-            return jsonify({k: v for k, v in res.items() if k in fields.split(',')})
+            return jsonify({k: v for k, v in res.items() if k in fields.split(",")})
         else:
             return jsonify(res)
     return {"error": "Not found"}, 404
 
 
-@api.get('/nodes', summary="Get nodes")
+@api.get("/nodes", summary="Get nodes")
 @httpauth.login_required
 def get_nodes():
     """
@@ -179,18 +179,18 @@ def get_nodes():
     """
     (user, group) = get_authinfo(request)
     dbase = cfg.db
-    table = dbase.get_table('nodes')
+    table = dbase.get_table("nodes")
     return jsonify(dbase.all(table))
 
 
-@api.get('/nodes/name/<node>', summary="Get node by name")
-@api.get('/nodes/id/<int:id>', summary="Get node by ID")
+@api.get("/nodes/name/<node>", summary="Get node by name")
+@api.get("/nodes/id/<int:id>", summary="Get node by ID")
 @httpauth.login_required
 def get_node_by_id_or_name(path: NodePath):
     node = path.node
     node_id = path.id
     dbase = cfg.db
-    table = dbase.get_table('nodes')
+    table = dbase.get_table("nodes")
     if node:
         res = dbase.get(table, name=node)
     else:
@@ -200,7 +200,7 @@ def get_node_by_id_or_name(path: NodePath):
     return jsonify(res)
 
 
-@api.post('/nodes', summary="Add a new node")
+@api.post("/nodes", summary="Add a new node")
 @httpauth.login_required
 @admin_required
 def add_node(body: AddEndpointRequest):
@@ -208,35 +208,37 @@ def add_node(body: AddEndpointRequest):
     Add a new Janus endpoint.
     """
     from janus.api.manager import ServiceManagerException
+
     try:
         req = body.model_dump()
         return jsonify(cfg.sm.add_endpoint(req))
     except ServiceManagerException as e:
-        raise BadRequest(f'Adding endpoint failed: {e}')
+        raise BadRequest(f"Adding endpoint failed: {e}")
     except Exception as e:
-        raise InternalServerError(f'Adding endpoint failed: {e}')
+        raise InternalServerError(f"Adding endpoint failed: {e}")
 
 
-@api.delete('/nodes/name/<node>', summary="Delete node by name")
-@api.delete('/nodes/id/<int:id>', summary="Delete node by ID")
+@api.delete("/nodes/name/<node>", summary="Delete node by name")
+@api.delete("/nodes/id/<int:id>", summary="Delete node by ID")
 @httpauth.login_required
 @admin_required
 def delete_node(path: NodePath):
     node = path.node
     node_id = path.id
     from janus.api.manager import ServiceManagerException
+
     try:
         if node:
             return jsonify(cfg.sm.delete_endpoint(name=node))
         else:
             return jsonify(cfg.sm.delete_endpoint(id=node_id))
     except ServiceManagerException as e:
-        raise BadRequest(f'Deleting endpoint failed: {e}')
+        raise BadRequest(f"Deleting endpoint failed: {e}")
     except Exception as e:
-        raise InternalServerError(f'Deleting endpoint failed: {e}')
+        raise InternalServerError(f"Deleting endpoint failed: {e}")
 
 
-@api.post('/create', summary="Create one or more new sessions.")
+@api.post("/create", summary="Create one or more new sessions.")
 @httpauth.login_required
 def create_sessions(body: SessionRequestList):
     """
@@ -245,12 +247,14 @@ def create_sessions(body: SessionRequestList):
     (user, group) = get_authinfo(request)
     req = body.root
     req = [r.model_dump() for r in req]
-    
+
     log.debug(req)
-    from janus.api.session_manager import (SessionManager,
-                                           InvalidSessionRequestException,
-                                           ResourceNotFoundException,
-                                           SessionManagerException)
+    from janus.api.session_manager import (
+        SessionManager,
+        InvalidSessionRequestException,
+        ResourceNotFoundException,
+        SessionManagerException,
+    )
 
     try:
         session_manager = SessionManager()
@@ -259,58 +263,70 @@ def create_sessions(body: SessionRequestList):
         session_manager.validate_request(req)
         session_requests = session_manager.parse_requests(user, group, req)
         session_manager.create_networks(session_requests)
-        janus_sessionid = session_manager.create_session(user, group, session_requests, req, current_user, users)
+        janus_sessionid = session_manager.create_session(
+            user, group, session_requests, req, current_user, users
+        )
         return jsonify({janus_sessionid: dict(id=janus_sessionid)})
     except InvalidSessionRequestException as e:
-        raise BadRequest(f'Creating session failed: {e}')
+        raise BadRequest(f"Creating session failed: {e}")
     except ResourceNotFoundException as e:
-        raise NotFound(f'Creating session failed: {e}')
+        raise NotFound(f"Creating session failed: {e}")
     except SessionManagerException as e:
-        raise InternalServerError(f'Creating session failed: {e}')
+        raise InternalServerError(f"Creating session failed: {e}")
     except Exception as e:
-        raise InternalServerError(f'Creating session failed. Unexpected: {type(e)}:{e}')
+        raise InternalServerError(f"Creating session failed. Unexpected: {type(e)}:{e}")
 
 
-@api.put('/start/<int:aid>', summary="Start a container service by id.")
+@api.put("/start/<int:aid>", summary="Start a container service by id.")
 @httpauth.login_required
 def start_session_endpoint(path: ActivePath):
     """
     Start a container service by id.
     """
     id = path.aid
-    from janus.api.session_manager import SessionManager, ResourceNotFoundException, SessionManagerException
+    from janus.api.session_manager import (
+        SessionManager,
+        ResourceNotFoundException,
+        SessionManagerException,
+    )
+
     (user, group) = get_authinfo(request)
     try:
         session_manager = SessionManager()
         return jsonify(session_manager.start_session(id, user, group))
     except ResourceNotFoundException as e:
-        raise NotFound(f'Creating session failed:{e}')
+        raise NotFound(f"Creating session failed:{e}")
     except SessionManagerException as e:
-        raise InternalServerError(f'Starting session failed:{e}')
+        raise InternalServerError(f"Starting session failed:{e}")
     except Exception as e:
-        raise InternalServerError(f'Starting session failed:FATAL:{type(e)}:{e}')
+        raise InternalServerError(f"Starting session failed:FATAL:{type(e)}:{e}")
 
 
-@api.put('/stop/<int:aid>', summary="Stop a container service by id.")
+@api.put("/stop/<int:aid>", summary="Stop a container service by id.")
 @httpauth.login_required
 def stop_session_endpoint(path: ActivePath):
     """
     Stop a container service by id.
     """
     id = path.aid
-    from janus.api.session_manager import SessionManager, ResourceNotFoundException, SessionManagerException
+    from janus.api.session_manager import (
+        SessionManager,
+        ResourceNotFoundException,
+        SessionManagerException,
+    )
+
     try:
         session_manager = SessionManager()
         return jsonify(session_manager.stop_session(id))
     except ResourceNotFoundException as e:
-        raise NotFound(f'Creating session failed:{e}')
+        raise NotFound(f"Creating session failed:{e}")
     except SessionManagerException as e:
-        raise InternalServerError(f'Stopping session failed:{e}')
+        raise InternalServerError(f"Stopping session failed:{e}")
     except Exception as e:
-        raise InternalServerError(f'Stopping session failed:FATAL:{type(e)}:{e}')
+        raise InternalServerError(f"Stopping session failed:FATAL:{type(e)}:{e}")
 
 
-@api.post('/exec', summary="Execute a container command inside an active session.")
+@api.post("/exec", summary="Execute a container command inside an active session.")
 @httpauth.login_required
 def exec_command(body: ExecRequest):
     """
@@ -325,7 +341,7 @@ def exec_command(body: ExecRequest):
     tty = req.get("tty", False)
 
     dbase = cfg.db
-    table = dbase.get_table('nodes')
+    table = dbase.get_table("nodes")
     node = dbase.get(table, name=nname)
     if not node:
         return jsonify({"error": f"Node not found: {nname}"}), 404
@@ -333,12 +349,13 @@ def exec_command(body: ExecRequest):
     container = req["container"]
     cmd = req["Cmd"]
 
-    kwargs = {'AttachStdin': attach,
-              'AttachStdout': attach,
-              'AttachStderr': attach,
-              'Tty': tty,
-              'Cmd': cmd
-              }
+    kwargs = {
+        "AttachStdin": attach,
+        "AttachStdout": attach,
+        "AttachStderr": attach,
+        "Tty": tty,
+        "Cmd": cmd,
+    }
 
     try:
         handler = cfg.sm.get_handler(nname=nname)
@@ -348,8 +365,8 @@ def exec_command(body: ExecRequest):
         return jsonify({"error": f"Could not execute command: {e}"}), 500
 
 
-@api.get('/images', summary="Get images")
-@api.get('/images/name/<path:name>', summary="Get a specific image")
+@api.get("/images", summary="Get images")
+@api.get("/images/name/<path:name>", summary="Get a specific image")
 @httpauth.login_required
 def get_images(path: ImagePath):
     """
@@ -357,7 +374,7 @@ def get_images(path: ImagePath):
     """
     name = path.name
     dbase = cfg.db
-    table = dbase.get_table('images')
+    table = dbase.get_table("images")
     if name:
         res = dbase.get(table, name=name)
         if not res:
@@ -370,15 +387,16 @@ class ProfileQuery(BaseModel):
     refresh: Optional[bool] = False
     reset: Optional[bool] = False
 
+
 def _handle_get_profiles(resource, query, rname=None):
     resources = [Constants.HOST, Constants.NET, Constants.VOL, Constants.QOS]
     if resource not in resources:
         return {"error": f"Invalid resource path: {resource}"}, 404
-        
+
     refresh = query.refresh
     reset = query.reset
     (user, group) = get_authinfo(request)
-    
+
     if refresh:
         try:
             cfg.pm.read_profiles(refresh=True)
@@ -398,18 +416,22 @@ def _handle_get_profiles(resource, query, rname=None):
         return jsonify(res.dict())
     else:
         log.debug("Returning all profiles")
-        ret = [p.dict() for p in cfg.pm.get_profiles(resource, user, group, inline=True)]
+        ret = [
+            p.dict() for p in cfg.pm.get_profiles(resource, user, group, inline=True)
+        ]
         return jsonify(ret if ret else list())
 
-@api.get('/profiles', summary="Get host profiles (default)")
+
+@api.get("/profiles", summary="Get host profiles (default)")
 @httpauth.login_required
 def get_profiles_default(query: ProfileQuery):
     """
     Get host profiles (defaults to 'host' resource).
     """
-    return _handle_get_profiles('host', query)
+    return _handle_get_profiles("host", query)
 
-@api.get('/profiles/<path:resource>', summary="Get profiles for a resource")
+
+@api.get("/profiles/<path:resource>", summary="Get profiles for a resource")
 @httpauth.login_required
 def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
     """
@@ -417,7 +439,8 @@ def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
     """
     return _handle_get_profiles(path.resource, query)
 
-@api.get('/profiles/<path:resource>/<path:rname>', summary="Get a specific profile")
+
+@api.get("/profiles/<path:resource>/<path:rname>", summary="Get a specific profile")
 @httpauth.login_required
 def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
     """
@@ -426,7 +449,7 @@ def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
     return _handle_get_profiles(path.resource, query, rname=path.rname)
 
 
-@api.post('/profiles/<path:resource>/<path:rname>', summary="Create a new profile")
+@api.post("/profiles/<path:resource>/<path:rname>", summary="Create a new profile")
 @httpauth.login_required
 def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     """
@@ -435,7 +458,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     resource = path.resource
     rname = path.rname
     resources = [Constants.HOST, Constants.NET, Constants.VOL, Constants.QOS]
-    
+
     try:
         if not resource or resource not in resources:
             return {"error": f"Invalid resource path: {resource}"}, 404
@@ -470,7 +493,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
 
     try:
         tbl = cfg.db.get_table(resource)
-        record = {'name': rname, "settings": default}
+        record = {"name": rname, "settings": default}
         res = cfg.db.insert(tbl, record)
         log.info(f"Created {res}")
     except Exception as e:
@@ -479,7 +502,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     return jsonify(cfg.pm.get_profile(resource, rname).dict()), 200
 
 
-@api.delete('/profiles/<path:resource>/<path:rname>', summary="Remove a profile")
+@api.delete("/profiles/<path:resource>/<path:rname>", summary="Remove a profile")
 @httpauth.login_required
 def delete_profile(path: ProfileFullByPath):
     """
@@ -488,7 +511,7 @@ def delete_profile(path: ProfileFullByPath):
     resource = path.resource
     rname = path.rname
     resources = [Constants.HOST, Constants.NET, Constants.VOL, Constants.QOS]
-    
+
     if not resource or resource not in resources:
         return {"error": f"Invalid resource path: {resource}"}, 404
     try:
@@ -516,9 +539,14 @@ def delete_profile(path: ProfileFullByPath):
     return {}, 204
 
 
-@api.get('/auth/<path:resource>', summary="Get auth info")
-@api.get('/auth/res/<path:resource>/id/<int:rid>', summary="Get specific auth info by ID")
-@api.get('/auth/res/<path:resource>/name/<path:rname>', summary="Get specific auth info by name")
+@api.get("/auth/<path:resource>", summary="Get auth info")
+@api.get(
+    "/auth/res/<path:resource>/id/<int:rid>", summary="Get specific auth info by ID"
+)
+@api.get(
+    "/auth/res/<path:resource>/name/<path:rname>",
+    summary="Get specific auth info by name",
+)
 @httpauth.login_required
 def get_auth(path: AuthPath):
     """
@@ -529,7 +557,7 @@ def get_auth(path: AuthPath):
     rname = path.rname
     (user, group) = get_authinfo(request)
     dbase = cfg.db
-    table = dbase.get_table('auth')
+    table = dbase.get_table("auth")
     quser = QueryUser()
     q = quser.query_builder(user, group, {"resource": resource})
     if rid:

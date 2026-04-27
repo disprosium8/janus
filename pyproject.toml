@@ -7,7 +7,7 @@ name = "janus-dtnaas"
 version = "0.3rc1.post14"
 description = "Janus DTNaaS Controller"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = {text = "BSD 3-Clause License"}
 authors = [
     {name = "Ezra Kissel", email = "kissel@es.net"}

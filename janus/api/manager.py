@@ -1,11 +1,10 @@
 import re
 import logging
-import queue
 from janus.api.portainer import PortainerDockerApi
 from janus.api.kubernetes import KubernetesApi
 from janus.api.slurm import JanusSlurmApi
 from janus.api.edge import JanusEdgeApi
-from janus.api.constants import State, EPType
+from janus.api.constants import EPType
 from janus.lib import AgentMonitor
 from janus.api.models import Node, AddEndpointRequest
 from janus.api.pubsub import Publisher
@@ -24,7 +23,7 @@ class ServiceManager:
             EPType.PORTAINER: PortainerDockerApi(),
             EPType.KUBERNETES: KubernetesApi(),
             EPType.SLURM: JanusSlurmApi(),
-            EPType.EDGE: JanusEdgeApi()
+            EPType.EDGE: JanusEdgeApi(),
         }
         self._pubsub = Publisher()
 
@@ -34,17 +33,17 @@ class ServiceManager:
 
     def _add_node_cb(self, node: dict, name, url):
         try:
-            table = self._db.get_table('images')
-            for img in node.get('images'):
-                iname = re.split(':|@', img)[0]
-                self._db.upsert(table, {'image': img, 'name': iname}, 'name', iname)
+            table = self._db.get_table("images")
+            for img in node.get("images"):
+                iname = re.split(":|@", img)[0]
+                self._db.upsert(table, {"image": img, "name": iname}, "name", iname)
         except Exception as e:
             log.error("Could not save images for {}: {}".format(url, e))
         try:
             ret = self._am.check_agent(Node(**node), url)
-            node['host'] = ret.json()
+            node["host"] = ret.json()
             ret = self._am.tune(url)
-            node['host']['tuning'] = ret.json()
+            node["host"]["tuning"] = ret.json()
         except Exception as e:
             log.error("Could not fetch agent info from {}: {}".format(url, e))
             self._am.start_agent(Node(**node))
@@ -57,6 +56,7 @@ class ServiceManager:
                 nodes.extend(ns)
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
                 log.error(f"Error retrieving nodes from {k}: {e}")
         return nodes
@@ -74,19 +74,19 @@ class ServiceManager:
 
     def remove_node(self, node: dict = None, nname=None):
         if nname:
-            ntable = self._db.get_table('nodes')
+            ntable = self._db.get_table("nodes")
             node = self._db.get(ntable, name=nname)
-        eptype = node.get('endpoint_type')
-        return self.service_map[eptype].remove_node(node.get('id'))
+        eptype = node.get("endpoint_type")
+        return self.service_map[eptype].remove_node(node.get("id"))
 
     def get_handler(self, node: dict = None, nname=None):
         if nname:
-            ntable = self._db.get_table('nodes')
+            ntable = self._db.get_table("nodes")
             node = self._db.get(ntable, name=nname)
         if not node:
             log.error(f"Node does not exist (node={node}, nname={nname})")
             return None
-        eptype = node.get('endpoint_type')
+        eptype = node.get("endpoint_type")
         return self.service_map[eptype]
 
     def get_auth_token(self, node: dict = None, ntype=EPType.PORTAINER):
@@ -97,54 +97,56 @@ class ServiceManager:
             return {"error": str(e)}
 
     def init_service(self, s, errs=False):
-        n = s.get('node')
-        sname = s.get('sname')
-        nname = n.get('name')
-        img = s.get('image')
+        n = s.get("node")
+        sname = s.get("sname")
+        nname = n.get("name")
+        img = s.get("image")
         handler = self.get_handler(n)
 
         if handler.type == EPType.PORTAINER:
             # Docker-specific v4 vs v6 image registry nonsense. Need to abstract this away.
             try:
-                handle_image(Node(**n), img, handler, s.get('pull_image'))
+                handle_image(Node(**n), img, handler, s.get("pull_image"))
             except Exception as e:
                 log.error(f"Could not pull image {img} on node {nname}: {e}")
-                errs = error_svc(s, e)
+                error_svc(s, e)
                 try:
                     v6img = f"registry.ipv6.docker.com/{img}"
-                    handle_image(Node(**n), v6img, handler, s.get('pull_image'))
-                    s['image'] = v6img
+                    handle_image(Node(**n), v6img, handler, s.get("pull_image"))
+                    s["image"] = v6img
                 except Exception as e:
                     log.error(f"Could not pull image {v6img} on node {nname}: {e}")
-                    errs = error_svc(s, e)
+                    error_svc(s, e)
                     return None, None
 
         # clear any errors if image resolved
-        s['errors'] = list()
-        errs = False
+        s["errors"] = list()
         try:
-            ret = handler.create_container(Node(**n), img, sname, **s['kwargs'])
+            ret = handler.create_container(Node(**n), img, sname, **s["kwargs"])
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             log.error(f"Could not create container on {nname}: {e}")
-            errs = error_svc(s, e)
+            error_svc(s, e)
             return None, None
 
         if not (cfg.dryrun):
             try:
                 # if specified, connect the management network to this created container
-                if s['mgmt_net']:
-                    net_kwargs = s['net_kwargs'] if 'net_kwargs' in s else dict()
-                    handler.connect_network(Node(**n), s['mgmt_net']['id'], ret['Id'], **net_kwargs)
+                if s["mgmt_net"]:
+                    net_kwargs = s["net_kwargs"] if "net_kwargs" in s else dict()
+                    handler.connect_network(
+                        Node(**n), s["mgmt_net"]["id"], ret["Id"], **net_kwargs
+                    )
             except Exception as e:
                 log.error("Could not connect network on {nname}: {e}")
-                errs = error_svc(s, e)
+                error_svc(s, e)
                 return None, None
 
-        s['container_id'] = ret['Id']
-        s['container_name'] = sname
+        s["container_id"] = ret["Id"]
+        s["container_name"] = sname
         # don't save node object in service record
         if s.get("node"):
-            del s['node']
-        return ret['Id'], nname
+            del s["node"]
+        return ret["Id"], nname

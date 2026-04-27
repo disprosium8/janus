@@ -7,8 +7,7 @@ from configparser import ConfigParser
 import werkzeug
 import sys
 
-from flask_openapi3 import OpenAPI, Info, Tag
-from flask import Blueprint
+from flask_openapi3 import OpenAPI, Info
 from flask_sock import Sock
 
 from janus.api.controller import api as controller_api
@@ -21,34 +20,42 @@ from janus.api.manager import ServiceManager
 from janus.api.sockets import handle_websocket
 
 
-info = Info(title="The ESnet Janus container API", version="0.1", description="REST endpoints for container provisioning and tuning")
+info = Info(
+    title="The ESnet Janus container API",
+    version="0.1",
+    description="REST endpoints for container provisioning and tuning",
+)
 app = OpenAPI(__name__, info=info)
 sock = Sock(app)
 
-logging_conf_path = os.path.normpath(os.path.join(os.path.dirname(__file__), 'config/logging.conf'))
+logging_conf_path = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "config/logging.conf")
+)
 logging.config.fileConfig(logging_conf_path)
 log = logging.getLogger(__name__)
 
 runner = None
 
+
 def parse_config(fpath):
     parser = ConfigParser(allow_no_value=True)
 
     parser.read(fpath)
-    if 'JANUS' not in parser.sections():
+    if "JANUS" not in parser.sections():
         log.warning("No configuration sections found in {}".format(fpath))
         return
 
-    config = parser['JANUS']
+    config = parser["JANUS"]
     try:
-        cfg.PORTAINER_URI = str(config.get('PORTAINER_URI', None))
-        cfg.PORTAINER_WS = str(config.get('PORTAINER_WS', None))
-        cfg.PORTAINER_USER = str(config.get('PORTAINER_USER', None))
-        cfg.PORTAINER_PASSWORD = str(config.get('PORTAINER_PASSWORD', None))
-        vssl = str(config.get('PORTAINER_VERIFY_SSL', True))
-        if vssl == 'False':
+        cfg.PORTAINER_URI = str(config.get("PORTAINER_URI", None))
+        cfg.PORTAINER_WS = str(config.get("PORTAINER_WS", None))
+        cfg.PORTAINER_USER = str(config.get("PORTAINER_USER", None))
+        cfg.PORTAINER_PASSWORD = str(config.get("PORTAINER_PASSWORD", None))
+        vssl = str(config.get("PORTAINER_VERIFY_SSL", True))
+        if vssl == "False":
             cfg.PORTAINER_VERIFY_SSL = False
             import urllib3
+
             urllib3.disable_warnings()
         else:
             cfg.PORTAINER_VERIFY_SSL = True
@@ -71,6 +78,7 @@ def parse_config(fpath):
 # noinspection PyShadowingNames
 def init(app):
     from janus.api.jwt_utils import JwtUtils
+
     if cfg.is_agent:
         app.register_api(agent_api)
     if cfg.is_controller:
@@ -82,49 +90,78 @@ def init(app):
     def WebSocket(sock):
         handle_websocket(sock)
 
+
 def stop_all():
     log.info("Stopping all plugins and runners...")
     for p in cfg.plugins:
         try:
             p.stop()
-        except:
+        except Exception:
             pass
     if runner:
         try:
             runner.stop()
-        except:
+        except Exception:
             pass
+
 
 def signal_handler(signum, frame):
     log.info(f"Received signal {signum}, shutting down...")
     stop_all()
     sys.exit(0)
 
+
 def main():
     global runner
-    parser = argparse.ArgumentParser(description='Janus Controller/Agent')
-    parser.add_argument('-b', '--bind', type=str, default='127.0.0.1',
-                        help='Bind to IP address (default: 127.0.0.1)')
-    parser.add_argument('-p', '--port', type=int, default=5000,
-                        help='Listen on port (default: 5000)')
-    parser.add_argument('--ssl', action='store_true', default=False,
-                        help='Use SSL')
-    parser.add_argument('-H', '--host', type=str, help='Remote Provisioning URI ')
-    parser.add_argument('-C', '--controller', action='store_true', default=False,
-                        help='Run as Controller')
-    parser.add_argument('-A', '--agent', action='store_true', default=False,
-                        help='Run as Tuning Agent')
+    parser = argparse.ArgumentParser(description="Janus Controller/Agent")
+    parser.add_argument(
+        "-b",
+        "--bind",
+        type=str,
+        default="127.0.0.1",
+        help="Bind to IP address (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "-p", "--port", type=int, default=5000, help="Listen on port (default: 5000)"
+    )
+    parser.add_argument("--ssl", action="store_true", default=False, help="Use SSL")
+    parser.add_argument("-H", "--host", type=str, help="Remote Provisioning URI ")
+    parser.add_argument(
+        "-C",
+        "--controller",
+        action="store_true",
+        default=False,
+        help="Run as Controller",
+    )
+    parser.add_argument(
+        "-A", "--agent", action="store_true", default=False, help="Run as Tuning Agent"
+    )
 
-    parser.add_argument('-E', '--edge',  action='store_true', default=False,
-                        help='Start Edge backend')
+    parser.add_argument(
+        "-E", "--edge", action="store_true", default=False, help="Start Edge backend"
+    )
 
-    parser.add_argument('--dryrun', action='store_true', default=False,
-                        help='Perform config provisioning but do not create containers')
-    parser.add_argument('-f', '--config', type=str, default=settings.DEFAULT_CFG_PATH,
-                        help='Path to configuration file')
-    parser.add_argument('-P', '--profiles', type=str, default=settings.DEFAULT_PROFILE_PATH,
-                        help='Path to profile directory')
-    parser.add_argument('-db', '--database', type=str, default=settings.DEFAULT_DB_PATH)
+    parser.add_argument(
+        "--dryrun",
+        action="store_true",
+        default=False,
+        help="Perform config provisioning but do not create containers",
+    )
+    parser.add_argument(
+        "-f",
+        "--config",
+        type=str,
+        default=settings.DEFAULT_CFG_PATH,
+        help="Path to configuration file",
+    )
+    parser.add_argument(
+        "-P",
+        "--profiles",
+        type=str,
+        default=settings.DEFAULT_PROFILE_PATH,
+        help="Path to profile directory",
+    )
+    parser.add_argument("-db", "--database", type=str, default=settings.DEFAULT_DB_PATH)
     args = parser.parse_args()
 
     parse_config(args.config)
@@ -143,20 +180,27 @@ def main():
             cfg.pm.read_profiles()
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             log.error(e)
             exit(1)
         cfg._controller = True
         # start any enabled plugins
-        if not settings.FLASK_DEBUG or (settings.FLASK_DEBUG and werkzeug.serving.is_running_from_reloader()):
+        if not settings.FLASK_DEBUG or (
+            settings.FLASK_DEBUG and werkzeug.serving.is_running_from_reloader()
+        ):
             for plugin in cfg.plugins:
                 plugin.start()
 
     if args.agent:
         cfg._agent = True
 
-        if args.edge and (not settings.FLASK_DEBUG or (settings.FLASK_DEBUG and werkzeug.serving.is_running_from_reloader())):
+        if args.edge and (
+            not settings.FLASK_DEBUG
+            or (settings.FLASK_DEBUG and werkzeug.serving.is_running_from_reloader())
+        ):
             from janus.remoting.ws_backend import WebsocketBackendRunner
+
             log.info("Starting WebsocketBackendRunner ...")
             runner = WebsocketBackendRunner(args.config)
             runner.start()
@@ -167,28 +211,41 @@ def main():
     # signal closure for re-reading profiles
     def sighup_handler(signum, frame):
         if args.controller:
-            log.info(f"Caught HUP signal {signum}/{frame}, reading profiles at {args.profiles}")
+            log.info(
+                f"Caught HUP signal {signum}/{frame}, reading profiles at {args.profiles}"
+            )
             cfg.db.read_profiles(refresh=True)
+
     signal.signal(signal.SIGHUP, sighup_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
-    log.info('Starting development Janus Server at http://{}{}'.format(platform.node(),
-                                                                       settings.API_PREFIX))
+    log.info(
+        "Starting development Janus Server at http://{}{}".format(
+            platform.node(), settings.API_PREFIX
+        )
+    )
     log.info("Using database file {}".format(cfg.get_dbpath()))
 
-    if not settings.FLASK_DEBUG or (settings.FLASK_DEBUG and werkzeug.serving.is_running_from_reloader()):
+    if not settings.FLASK_DEBUG or (
+        settings.FLASK_DEBUG and werkzeug.serving.is_running_from_reloader()
+    ):
         init(app)
     if settings.FLASK_DEBUG:
-        app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+        app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 
-    ssl = 'adhoc' if args.ssl else None
+    ssl = "adhoc" if args.ssl else None
     try:
-        app.run(host=args.bind, port=args.port, ssl_context=ssl,
-                debug=settings.FLASK_DEBUG, threaded=True)
+        app.run(
+            host=args.bind,
+            port=args.port,
+            ssl_context=ssl,
+            debug=settings.FLASK_DEBUG,
+            threaded=True,
+        )
     finally:
         stop_all()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
