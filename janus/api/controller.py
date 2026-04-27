@@ -263,7 +263,13 @@ def add_node(body: AddEndpointRequest):
 
     try:
         log.debug(f"Adding node with body: {body.model_dump()}")
-        return jsonify(cfg.sm.add_node(body))
+        res = cfg.sm.add_node(body)
+        
+        # Trigger an immediate refresh for the new node
+        from janus.api.db import init_db
+        init_db(nname=body.name, refresh=True)
+        
+        return jsonify(res)
     except ServiceManagerException as e:
         raise BadRequest(f"Adding endpoint failed: {e}")
     except Exception as e:
@@ -295,9 +301,9 @@ def delete_node(path: NodePath):
 
     try:
         if node:
-            cfg.sm.delete_endpoint(name=node)
+            cfg.sm.remove_node(nname=node)
         else:
-            cfg.sm.delete_endpoint(id=node_id)
+            cfg.sm.remove_node(node=doc)
         return "", 204
     except ServiceManagerException as e:
         raise BadRequest(f"Deleting endpoint failed: {e}")
@@ -312,8 +318,11 @@ def create_sessions(body: SessionRequestList):
     Create one or more new sessions.
     """
     (user, group) = get_authinfo(request)
-    req = body.root
-    req = [r.model_dump() for r in req]
+    req_root = body.root
+    if isinstance(req_root, list):
+        req = [r.model_dump() for r in req_root]
+    else:
+        req = [req_root.model_dump()]
 
     from janus.api.session_manager import (
         SessionManager,
@@ -551,7 +560,9 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
         else:
             default = {}
 
-        default.update((k, configs[k]) for k in default.keys() & configs.keys())
+        # Merge new configs into template
+        default.update(configs)
+        
         prof = {"name": rname, "settings": default}
         if resource == Constants.HOST:
             ContainerProfile(**prof)
@@ -561,17 +572,31 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
             NetworkProfile(**prof)
 
     except ValidationError as e:
-        return str(e), 400
+        log.error(f"Validation error creating profile {rname}: {e}")
+        return jsonify({"error": str(e), "details": e.errors()}), 400
     except Exception as e:
-        return str(e), 500
+        log.exception(f"Unexpected error creating profile {rname}: {e}")
+        return jsonify({"error": str(e)}), 500
 
     try:
         tbl = cfg.db.get_table(resource)
         record = {"name": rname, "settings": default}
         res = cfg.db.insert(tbl, record)
-        log.info(f"Created {res}")
+        log.info(f"Created {rname} in database")
+        
+        # Sync in-memory cache
+        if resource == Constants.HOST:
+            cfg._profiles[rname] = default
+        elif resource == Constants.NET:
+            cfg._networks[rname] = default
+        elif resource == Constants.VOL:
+            cfg._volumes[rname] = default
+        elif resource == Constants.QOS:
+            cfg._qos[rname] = default
+            
     except Exception as e:
-        return str(e), 500
+        log.exception(f"Error saving new profile {rname} to DB: {e}")
+        return jsonify({"error": str(e)}), 500
 
     return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
@@ -595,17 +620,11 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
         if not res:
             return {"error": f"Profile {rname} not found!"}, 404
 
-        if resource == Constants.HOST:
-            default = cfg._base_profile.copy()
-        elif resource == Constants.VOL:
-            default = cfg._base_volumes.copy()
-        elif resource == Constants.NET:
-            default = cfg._base_networks.copy()
-        else:
-            default = {}
-
-        default.update((k, configs[k]) for k in default.keys() & configs.keys())
-        prof = {"name": rname, "settings": default}
+        # Start with existing settings rather than base template
+        current_settings = res.settings.model_dump()
+        current_settings.update(configs)
+        
+        prof = {"name": rname, "settings": current_settings}
         if resource == Constants.HOST:
             ContainerProfile(**prof)
         elif resource == Constants.VOL:
@@ -614,18 +633,31 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
             NetworkProfile(**prof)
 
     except ValidationError as e:
-        return str(e), 400
+        log.error(f"Validation error updating profile {rname}: {e}")
+        return jsonify({"error": str(e), "details": e.errors()}), 400
     except Exception as e:
-        return str(e), 500
+        log.exception(f"Unexpected error updating profile {rname}: {e}")
+        return jsonify({"error": str(e)}), 500
 
     try:
         tbl = cfg.db.get_table(resource)
-        record = {"name": rname, "settings": default}
+        record = {"name": rname, "settings": current_settings}
         cfg.db.update(tbl, record, name=rname)
-        log.info(f"Updated {rname}")
-        cfg.pm.read_profiles(refresh=True)
+        log.info(f"Updated {rname} in database")
+        
+        # Manually sync in-memory cache instead of full disk reload
+        if resource == Constants.HOST:
+            cfg._profiles[rname] = current_settings
+        elif resource == Constants.NET:
+            cfg._networks[rname] = current_settings
+        elif resource == Constants.VOL:
+            cfg._volumes[rname] = current_settings
+        elif resource == Constants.QOS:
+            cfg._qos[rname] = current_settings
+            
     except Exception as e:
-        return str(e), 500
+        log.exception(f"Error saving updated profile {rname} to DB: {e}")
+        return jsonify({"error": str(e)}), 500
 
     return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
@@ -656,13 +688,13 @@ def delete_profile(path: ProfileFullByPath):
             return {"error": f"Profile not found: {rname}"}, 404
 
     except Exception as e:
-        return str(e), 500
+        return jsonify({"error": str(e)}), 500
 
     try:
         profile_tbl = cfg.db.get_table(resource)
         cfg.db.remove(profile_tbl, name=rname)
     except Exception as e:
-        return str(e), 500
+        return jsonify({"error": str(e)}), 500
 
     return {}, 204
 

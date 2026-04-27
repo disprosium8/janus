@@ -80,8 +80,27 @@ class ServiceManager:
         if nname:
             ntable = self._db.get_table("nodes")
             node = self._db.get(ntable, name=nname)
+        if not node:
+            return None
+            
         eptype = node.get("endpoint_type")
-        return self.service_map[eptype].remove_node(node.get("id"))
+        nid = node.get("id")
+        nname = node.get("name")
+        
+        try:
+            self.service_map[eptype].remove_node(nid)
+        except Exception as e:
+            # If the backend says it's not found (404), we still want to remove it locally
+            if "(404)" in str(e) or "Not Found" in str(e):
+                log.warning(f"Node {nname} (id {nid}) not found on backend, removing locally only.")
+            else:
+                raise e
+        
+        # Always remove from local DB if we reached this point
+        ntable = self._db.get_table("nodes")
+        self._db.remove(ntable, name=nname)
+        log.info(f"Removed node {nname} (id {nid}) from Janus database.")
+        return True
 
     def get_handler(self, node: dict = None, nname=None):
         if nname:

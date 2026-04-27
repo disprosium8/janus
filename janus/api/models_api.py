@@ -23,7 +23,7 @@ class SessionRequest(BaseModel):
 
 # Helper for list of requests
 class SessionRequestList(RootModel):
-    root: List[SessionRequest]
+    root: Union[SessionRequest, List[SessionRequest]]
 
 
 class ProfileRequest(BaseModel):

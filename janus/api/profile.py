@@ -97,7 +97,11 @@ class ProfileManager(QueryUser):
                                 if k == "networks":
                                     for key, value in v.items():
                                         try:
-                                            prof = {"name": key, "settings": value}
+                                            prof = {
+                                                "name": key,
+                                                "settings": value,
+                                                "on_disk": True,
+                                            }
                                             NetworkProfile(**prof)
                                             cfg._networks[key] = value
                                             self._db.upsert(net_tbl, prof, "name", key)
@@ -109,7 +113,11 @@ class ProfileManager(QueryUser):
                                 if k == "volumes":
                                     for key, value in v.items():
                                         try:
-                                            prof = {"name": key, "settings": value}
+                                            prof = {
+                                                "name": key,
+                                                "settings": value,
+                                                "on_disk": True,
+                                            }
                                             VolumeProfile(**prof)
                                             cfg._volumes[key] = value
                                             self._db.upsert(vol_tbl, prof, "name", key)
@@ -121,7 +129,11 @@ class ProfileManager(QueryUser):
                                 if k == "qos":
                                     for key, value in v.items():
                                         try:
-                                            prof = {"name": key, "settings": value}
+                                            prof = {
+                                                "name": key,
+                                                "settings": value,
+                                                "on_disk": True,
+                                            }
                                             QoS_Controller(**prof)
                                             cfg._qos[key] = value
                                             self._db.upsert(qos_tbl, prof, "name", key)
@@ -133,7 +145,11 @@ class ProfileManager(QueryUser):
                                         try:
                                             temp = cfg._base_profile.copy()
                                             temp.update(value)
-                                            prof = {"name": key, "settings": temp}
+                                            prof = {
+                                                "name": key,
+                                                "settings": temp,
+                                                "on_disk": True,
+                                            }
                                             ContainerProfile(**prof)
                                             cfg._profiles[key] = temp
                                             self._db.upsert(host_tbl, prof, "name", key)
