@@ -1,11 +1,14 @@
 import os
 import sys
 import re
-import numa
+try:
+    import numa
+except ImportError:
+    numa = None
 
 def build_numa():
     ret = dict()
-    if not numa.available():
+    if not numa or not numa.available():
         return ret
     
     nodes = numa.get_max_node() + 1

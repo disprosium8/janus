@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "janus-dtnaas"
+version = "0.3rc1.post14"
+description = "Janus DTNaaS Controller"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "BSD 3-Clause License"}
+authors = [
+    {name = "Ezra Kissel", email = "kissel@es.net"}
+]
+keywords = ["Janus", "Controller"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+]
+dynamic = ["dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/esnet/janus"
+
+[project.scripts]
+janus-ctrl = "janus.app:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["janus*"]
+
+[tool.setuptools.package-data]
+janus = ["config/*", "config/profiles/*"]
