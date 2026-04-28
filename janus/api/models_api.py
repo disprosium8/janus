@@ -11,6 +11,7 @@ class AddEndpointRequest(BaseModel):
 
 
 class SessionRequest(BaseModel):
+    name: Optional[str] = Field(None, description="Optional session name")
     instances: List[Union[dict, str]]
     image: str
     profile: str
@@ -43,6 +44,14 @@ class ExecRequest(BaseModel):
 class AuthRequest(BaseModel):
     users: List[str]
     groups: List[str]
+
+
+class AuthBulkRequest(BaseModel):
+    resource: str = Field(..., description="Resource type")
+    identifiers: List[Union[str, int]] = Field(..., description="List of resource names or IDs")
+    users: List[str] = Field(default_factory=list)
+    groups: List[str] = Field(default_factory=list)
+    remove: Optional[bool] = Field(False, description="If true, remove these users/groups instead of adding them")
 
 
 # Query Models for Flask-OpenAPI3

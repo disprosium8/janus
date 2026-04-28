@@ -88,9 +88,18 @@ def handle_websocket(sock):
     if typ == WSType.EXEC_STREAM:
         log.debug(f"Got exec stream request from {sock.sock.getpeername()}")
         req = WSExecStream(**js)
+        
+        # Lookup current node info to get correct ID
+        dbase = cfg.db
+        ntable = dbase.get_table("nodes")
+        node_doc = dbase.get(ntable, name=req.node)
+        if not node_doc:
+            sock.send(json.dumps({"error": f"Node {req.node} not found"}))
+            return
+            
         handler = cfg.sm.get_handler(nname=req.node)
         session = handler.exec_stream(
-            Node(id=req.node_id, name=req.node), req.container, req.exec_id
+            Node(**node_doc), req.container, req.exec_id
         )
         receive_queue = session.receive_queue
         send_queue = session.send_queue

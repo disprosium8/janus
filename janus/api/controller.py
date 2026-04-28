@@ -6,13 +6,13 @@ from flask import request, jsonify, abort
 from flask_httpauth import HTTPBasicAuth
 from flask_openapi3 import APIBlueprint, Tag
 from pydantic import ValidationError, BaseModel
-from werkzeug.exceptions import BadRequest, NotFound, InternalServerError
 from werkzeug.security import check_password_hash
 
 from janus.api.db import QueryUser
 from janus.api.models import Node, ContainerProfile, NetworkProfile, VolumeProfile
 from janus.api.models_api import (
     AddEndpointRequest,
+    SessionRequest,
     SessionRequestList,
     ProfileRequest,
     ExecRequest,
@@ -30,6 +30,7 @@ from janus.api.models_api import (
     ProfileFullByPath,
     AuthPath,
     AuthRequest,
+    AuthBulkRequest,
 )
 from janus.api.utils import Constants
 
@@ -125,7 +126,14 @@ def get_logs(path: LogPath, query: LogQuery):
                 tail = query.tail
                 svc = res["services"][nname]
                 cid = svc[0]["container_id"]
-                n = Node(id=svc[0]["node_id"], name=nname)
+                
+                # Fetch current node info to get the correct node ID
+                ntable = dbase.get_table("nodes")
+                node_doc = dbase.get(ntable, name=nname)
+                if not node_doc:
+                    return {"error": f"Node {nname} not found"}, 404
+                
+                n = Node(**node_doc)
                 handler = cfg.sm.get_handler(nname=nname)
                 return handler.get_logs(n, cid, since, stderr, stdout, tail, ts)
             except Exception as e:
@@ -179,6 +187,49 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
     return {"error": "Not found"}, 404
 
 
+@api.put("/active/<int:aid>", summary="Update a specific active session")
+@httpauth.login_required
+def put_active(path: ActivePath, body: SessionRequest):
+    """
+    Update a session's name or desired configuration.
+    """
+    aid = path.aid
+    (user, group) = get_authinfo(request)
+    
+    try:
+        from janus.api.session_manager import SessionManager
+        sm = SessionManager()
+        res = sm.update_session(aid, body.model_dump(), user, group)
+        
+        # If immediate apply is requested via query param
+        if request.args.get('apply') == 'true':
+            res = sm.reprovision_session(aid, user, group)
+            
+        return jsonify(res), 200
+    except Exception as e:
+        log.exception(f"Error updating session {aid}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@api.post("/active/<int:aid>/apply", summary="Apply changes to a session")
+@httpauth.login_required
+def post_active_apply(path: ActivePath):
+    """
+    Re-provision a session to apply modified settings.
+    """
+    aid = path.aid
+    (user, group) = get_authinfo(request)
+    
+    try:
+        from janus.api.session_manager import SessionManager
+        sm = SessionManager()
+        res = sm.reprovision_session(aid, user, group)
+        return jsonify(res), 200
+    except Exception as e:
+        log.exception(f"Error applying changes to session {aid}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @api.delete("/active/<int:aid>", summary="Delete a specific active session")
 @httpauth.login_required
 def delete_active(path: ActivePath, query: ActiveQuery):
@@ -194,17 +245,17 @@ def delete_active(path: ActivePath, query: ActiveQuery):
         SessionManagerException,
     )
 
+    force = query.force
     try:
-        force = query.force
         session_manager = SessionManager()
-        session_manager.delete(aid, force, user, group)
-        return "", 204
+        session_manager.delete(aid, force=force, user=user, group=group)
+        return {}, 204
     except ResourceNotFoundException as e:
-        raise NotFound(f"Deleting session failed: {e}")
+        return jsonify({"error": f"Deleting session failed:{e}"}), 404
     except SessionManagerException as e:
-        raise InternalServerError(f"Deleting session failed: {e}")
+        return jsonify({"error": f"Deleting session failed:{e}"}), 500
     except Exception as e:
-        raise InternalServerError(f"Deleting session failed: FATAL: {type(e)}: {e}")
+        return jsonify({"error": f"Deleting session failed:FATAL:{type(e)}:{e}"}), 500
 
 
 @api.get("/nodes", summary="Get nodes")
@@ -236,7 +287,7 @@ def get_nodes(query: NodeQuery):
 @api.get("/nodes/<node>", summary="Get node by name")
 @api.get("/nodes/<int:id>", summary="Get node by ID")
 @httpauth.login_required
-def get_node_by_id_or_name(path: NodePath):
+def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
     node = path.node
     node_id = path.id
     (user, group) = get_authinfo(request)
@@ -249,7 +300,7 @@ def get_node_by_id_or_name(path: NodePath):
 
     if not res:
         return {"error": "Not found"}, 404
-    return jsonify(res)
+    return jsonify(filter_fields(res, query.fields))
 
 
 @api.post("/nodes", summary="Add a new node")
@@ -271,10 +322,10 @@ def add_node(body: AddEndpointRequest):
         
         return jsonify(res)
     except ServiceManagerException as e:
-        raise BadRequest(f"Adding endpoint failed: {e}")
+        return jsonify({"error": f"Adding endpoint failed: {e}"}), 400
     except Exception as e:
         log.exception(f"Unexpected error adding node: {e}")
-        raise InternalServerError(f"Adding endpoint failed: {e}")
+        return jsonify({"error": f"Adding endpoint failed: {e}"}), 500
 
 
 @api.delete("/nodes/<node>", summary="Delete node by name")
@@ -306,9 +357,10 @@ def delete_node(path: NodePath):
             cfg.sm.remove_node(node=doc)
         return "", 204
     except ServiceManagerException as e:
-        raise BadRequest(f"Deleting endpoint failed: {e}")
+        return jsonify({"error": f"Deleting endpoint failed: {e}"}), 400
     except Exception as e:
-        raise InternalServerError(f"Deleting endpoint failed: {e}")
+        log.exception(f"Unexpected error deleting node: {e}")
+        return jsonify({"error": f"Deleting endpoint failed: {e}"}), 500
 
 
 @api.post("/create", summary="Create one or more new sessions.")
@@ -343,13 +395,14 @@ def create_sessions(body: SessionRequestList):
         )
         return jsonify({janus_sessionid: dict(id=janus_sessionid)})
     except InvalidSessionRequestException as e:
-        raise BadRequest(f"Creating session failed: {e}")
+        return jsonify({"error": f"Creating session failed: {e}"}), 400
     except ResourceNotFoundException as e:
-        raise NotFound(f"Creating session failed: {e}")
+        return jsonify({"error": f"Creating session failed: {e}"}), 404
     except SessionManagerException as e:
-        raise InternalServerError(f"Creating session failed: {e}")
+        return jsonify({"error": f"Creating session failed: {e}"}), 500
     except Exception as e:
-        raise InternalServerError(f"Creating session failed. Unexpected: {type(e)}:{e}")
+        log.exception(f"Unexpected error creating sessions: {e}")
+        return jsonify({"error": f"Creating session failed. Unexpected: {type(e)}:{e}"}), 500
 
 
 @api.put("/start/<int:aid>", summary="Start a container service by id.")
@@ -370,11 +423,12 @@ def start_session_endpoint(path: ActivePath):
         session_manager = SessionManager()
         return jsonify(session_manager.start_session(id, user, group))
     except ResourceNotFoundException as e:
-        raise NotFound(f"Creating session failed:{e}")
+        return jsonify({"error": f"Creating session failed:{e}"}), 404
     except SessionManagerException as e:
-        raise InternalServerError(f"Starting session failed:{e}")
+        return jsonify({"error": f"Starting session failed:{e}"}), 500
     except Exception as e:
-        raise InternalServerError(f"Starting session failed:FATAL:{type(e)}:{e}")
+        log.exception(f"Starting session failed: {e}")
+        return jsonify({"error": f"Starting session failed:FATAL:{type(e)}:{e}"}), 500
 
 
 @api.put("/stop/<int:aid>", summary="Stop a container service by id.")
@@ -394,11 +448,12 @@ def stop_session_endpoint(path: ActivePath):
         session_manager = SessionManager()
         return jsonify(session_manager.stop_session(id))
     except ResourceNotFoundException as e:
-        raise NotFound(f"Creating session failed:{e}")
+        return jsonify({"error": f"Stopping session failed:{e}"}), 404
     except SessionManagerException as e:
-        raise InternalServerError(f"Stopping session failed:{e}")
+        return jsonify({"error": f"Stopping session failed:{e}"}), 500
     except Exception as e:
-        raise InternalServerError(f"Stopping session failed:FATAL:{type(e)}:{e}")
+        return jsonify({"error": f"Stopping session failed:FATAL:{type(e)}:{e}"}), 500
+
 
 
 @api.post("/exec", summary="Execute a container command inside an active session.")
@@ -495,14 +550,14 @@ def _handle_get_profiles(resource, query, rname=None):
         res = cfg.pm.get_profile(resource, rname, user, group, inline=True)
         if not res:
             return {"error": f"Profile not found: {rname}"}, 404
-        return jsonify(res.model_dump())
+        return jsonify(filter_fields(res.model_dump(), query.fields))
     else:
         log.debug(f"Returning all profiles for resource: {resource}")
         ret = [
             p.model_dump()
             for p in cfg.pm.get_profiles(resource, user, group, inline=True)
         ]
-        return jsonify(ret if ret else list())
+        return jsonify(filter_fields(ret if ret else list(), query.fields))
 
 
 @api.get("/profiles", summary="Get host profiles (default)")
@@ -563,7 +618,11 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
         # Merge new configs into template
         default.update(configs)
         
-        prof = {"name": rname, "settings": default}
+        prof = {
+            "name": rname,
+            "settings": default,
+            "is_system": rname == "default",
+        }
         if resource == Constants.HOST:
             ContainerProfile(**prof)
         elif resource == Constants.VOL:
@@ -624,7 +683,12 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
         current_settings = res.settings.model_dump()
         current_settings.update(configs)
         
-        prof = {"name": rname, "settings": current_settings}
+        prof = {
+            "name": rname,
+            "settings": current_settings,
+            "is_system": rname == "default" or getattr(res, "is_system", False),
+            "is_modified": getattr(res, "on_disk", False),
+        }
         if resource == Constants.HOST:
             ContainerProfile(**prof)
         elif resource == Constants.VOL:
@@ -641,9 +705,16 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
 
     try:
         tbl = cfg.db.get_table(resource)
-        record = {"name": rname, "settings": current_settings}
+        # Persist the full profile state including flags
+        record = {
+            "name": rname,
+            "settings": current_settings,
+            "is_system": prof["is_system"],
+            "is_modified": prof["is_modified"],
+            "on_disk": getattr(res, "on_disk", False),
+        }
         cfg.db.update(tbl, record, name=rname)
-        log.info(f"Updated {rname} in database")
+        log.info(f"Updated {rname} in database (is_modified=True)")
         
         # Manually sync in-memory cache instead of full disk reload
         if resource == Constants.HOST:
@@ -674,29 +745,25 @@ def delete_profile(path: ProfileFullByPath):
 
     if not resource or resource not in resources:
         return {"error": f"Invalid resource path: {resource}"}, 404
+
+    if not rname:
+        return jsonify({"error": "Must specify profile name"}), 400
+    if rname == "default":
+        return jsonify({"error": "Cannot delete default profile"}), 400
+
+    (user, group) = get_authinfo(request)
+    
     try:
-        (user, group) = get_authinfo(request)
-
-        if not rname:
-            raise BadRequest("Must specify profile name")
-
-        if rname == "default":
-            raise BadRequest("Cannot delete default profile")
-
         res = cfg.pm.get_profile(resource, rname, user, group, inline=True)
         if not res:
             return {"error": f"Profile not found: {rname}"}, 404
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    try:
         profile_tbl = cfg.db.get_table(resource)
         cfg.db.remove(profile_tbl, name=rname)
+        return {}, 204
     except Exception as e:
+        log.exception(f"Error deleting profile {rname}: {e}")
         return jsonify({"error": str(e)}), 500
-
-    return {}, 204
 
 
 RESOURCE_DB_MAP = {
@@ -705,6 +772,57 @@ RESOURCE_DB_MAP = {
     "profiles": "host",
     "active": "active",
 }
+
+
+@api.post("/auth/bulk", summary="Bulk update auth info")
+@httpauth.login_required
+@admin_required
+def post_auth_bulk(body: AuthBulkRequest):
+    """
+    Bulk update user and group attributes for multiple resources.
+    """
+    resource = body.resource
+    identifiers = body.identifiers
+    req_users = set(body.users)
+    req_groups = set(body.groups)
+    remove = body.remove
+
+    if resource not in Constants.AUTH_RESOURCES:
+        return {"error": f"Invalid resource path: {resource}"}, 404
+
+    dbase = cfg.db
+    table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
+    results = []
+    
+    from tinydb import Query
+    Q = Query()
+    
+    for ident in identifiers:
+        # Determine if identifier is ID or Name
+        if isinstance(ident, int):
+            query = (Q.id == ident)
+        else:
+            query = (Q.name == ident)
+            
+        res = dbase.get(table, query=query)
+        if not res:
+            results.append({"identifier": ident, "status": "not_found"})
+            continue
+            
+        current_users = set(res.get("users", []))
+        current_groups = set(res.get("groups", []))
+        
+        if remove:
+            res["users"] = list(current_users - req_users)
+            res["groups"] = list(current_groups - req_groups)
+        else:
+            res["users"] = list(current_users | req_users)
+            res["groups"] = list(current_groups | req_groups)
+            
+        dbase.update(table, res, query=query)
+        results.append({"identifier": ident, "status": "updated"})
+        
+    return jsonify({"resource": resource, "results": results}), 200
 
 
 @api.get("/auth/<path:resource>", summary="Get auth info")

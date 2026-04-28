@@ -150,6 +150,7 @@ class SessionManager(QueryUser):
 
                 session_requests.append(
                     SessionRequest(
+                        name=r.get("name"),
                         node=node,
                         profile=prof,
                         image=r["image"],
@@ -262,11 +263,14 @@ class SessionManager(QueryUser):
             precommit_db(Id=db_id, delete=True)
             raise SessionManagerException(f"Was not able to create all services:{e}")
 
+        error = False
         if not cfg.dryrun:
             try:
                 for k, services in svcs.items():
                     for s in services:
-                        cfg.sm.init_service(s)
+                        ret, _ = cfg.sm.init_service(s)
+                        if ret is None:
+                            error = True
             except Exception as e:
                 import traceback
 
@@ -278,8 +282,9 @@ class SessionManager(QueryUser):
 
         record = dict(
             uuid=str(uuid.uuid4()),
+            name=session_requests[0].name if session_requests else None,
             user=user if user else current_user,
-            state=State.INITIALIZED.name,
+            state=State.MIXED.name if error else State.INITIALIZED.name,
         )
         record["id"] = db_id
         record["services"] = svcs
@@ -287,8 +292,103 @@ class SessionManager(QueryUser):
         record["users"] = user.split(",") if user else users
         record["groups"] = group.split(",") if group else []
         record["overrides"] = all_overrides
+        record["is_modified"] = False
         commit_db(record, db_id)
         return db_id
+
+    def update_session(self, aid, data, user=None, group=None):
+        """
+        Update session metadata and request without re-provisioning.
+        """
+        dbase = cfg.db
+        table = dbase.get_table("active")
+        query = self.query_builder(user, group, {"id": aid})
+        svc = dbase.get(table, query=query)
+
+        if not svc:
+            raise ResourceNotFoundException(f"no janus session found for {aid}")
+
+        # Update metadata
+        if "name" in data:
+            svc["name"] = data["name"]
+        
+        # Update the desired request
+        # Convert incoming JSON request back into the internal format if needed
+        # but for now we'll just store the raw dict since parse_requests handles it
+        svc["request"] = [data]
+        svc["is_modified"] = True
+        
+        return commit_db(svc, aid)
+
+    def reprovision_session(self, aid, user=None, group=None):
+        """
+        Apply modified settings by re-provisioning the session.
+        """
+        dbase = cfg.db
+        table = dbase.get_table("active")
+        query = self.query_builder(user, group, {"id": aid})
+        svc = dbase.get(table, query=query)
+
+        if not svc:
+            raise ResourceNotFoundException(f"no janus session found for {aid}")
+
+        old_state = svc.get("state")
+        
+        # 1. Stop and remove existing containers ONLY (don't delete DB record)
+        # We iterate through the current realized services
+        current_services = svc.get("services", {})
+        for nname, services in current_services.items():
+            handler = cfg.sm.get_handler(nname=nname)
+            for s in services:
+                cid = s.get("container_id")
+                if cid:
+                    try:
+                        node = Node(**dbase.get(dbase.get_table("nodes"), name=nname))
+                        log.info(f"Stopping/Removing container {cid} for re-provisioning")
+                        handler.stop_container(node, cid)
+                        handler.remove_container(node, cid)
+                    except Exception as e:
+                        log.warning(f"Cleanup error during re-provision: {e}")
+
+        # 2. Parse the updated request (already saved in svc['request'] by update_session)
+        updated_req = svc.get("request")
+        session_requests = self.parse_requests(user, group, updated_req)
+        
+        # 3. Re-initialize
+        db_id = aid
+        svcs = dict()
+        addrs_v4, addrs_v6 = set(), set()
+        cports, sports = set(), set()
+
+        for i, s in enumerate(session_requests):
+            nname = s.node.get("name")
+            if nname not in svcs:
+                svcs[nname] = list()
+            sname = cname_from_id(db_id, i + 1, "janus" + "-" + s.profile.name)
+            rec = cfg.sm.get_handler(s.node).create_service_record(
+                sname, s, addrs_v4, addrs_v6, cports, sports
+            )
+            svcs[nname].append(rec)
+
+        error = False
+        if not cfg.dryrun:
+            for k, services in svcs.items():
+                for s in services:
+                    ret, _ = cfg.sm.init_service(s)
+                    if ret is None:
+                        error = True
+
+        # 4. Update the record
+        svc["services"] = svcs
+        svc["is_modified"] = False
+        svc["state"] = State.MIXED.name if error else State.INITIALIZED.name
+        commit_db(svc, aid)
+        
+        # 5. Restore previous state (if it was started)
+        if old_state == State.STARTED.name:
+            self.start_session(aid, user, group)
+            
+        return dbase.get(table, query=query)
 
     @staticmethod
     def _do_poststart(s):
@@ -373,7 +473,6 @@ class SessionManager(QueryUser):
                         continue
                     except Exception as e:
                         import traceback
-
                         traceback.print_exc()
                         log.error(f"Could not start container on {k}: {e}")
                         error_svc(s, e)

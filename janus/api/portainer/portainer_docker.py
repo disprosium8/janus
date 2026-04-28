@@ -378,9 +378,10 @@ class PortainerDockerApi(Service):
             status = res.status
         except ApiException as e:
             status = e.status
-            # not modified, container is already stopped
-            if e.status == 304:
-                pass
+            # 304: already stopped, 404: container gone (e.g. autoremove)
+            if e.status in [304, 404]:
+                log.debug(f"Container {cid} already stopped or gone (status {e.status})")
+                status = 204
             else:
                 raise e
         return {
@@ -392,16 +393,24 @@ class PortainerDockerApi(Service):
 
     def remove_container(self, node: Node, cid, **kwargs):
         kwargs["_return_http_data_only"] = True
-        res = self._call(
-            "/endpoints/{}/docker/containers/{}".format(node.id, cid),
-            "DELETE",
-            None,
-            **kwargs,
-        )
-        if res.status == 204:
-            return {"status": "{} OK".format(res.status)}
-        string = res.read().decode("utf-8")
-        return json.loads(string)
+        status = 204
+        try:
+            res = self._call(
+                "/endpoints/{}/docker/containers/{}".format(node.id, cid),
+                "DELETE",
+                None,
+                **kwargs,
+            )
+            status = res.status
+        except ApiException as e:
+            status = e.status
+            # 404: container already gone
+            if e.status == 404:
+                log.debug(f"Container {cid} already gone (status 404)")
+                status = 204
+            else:
+                raise e
+        return status
 
     # Networks
     def get_networks(self, node: Node, nid=None, **kwargs):

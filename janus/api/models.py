@@ -17,6 +17,8 @@ class QoS_Controller(BaseModel):
     name: str
     settings: QoSProfileSettings
     on_disk: bool = False
+    is_system: bool = False
+    is_modified: bool = False
 
 
 class QoS_Agent(BaseModel):
@@ -77,6 +79,8 @@ class ContainerProfile(BaseModel):
     users: Optional[List[str]] = []
     groups: Optional[List[str]] = []
     on_disk: bool = False
+    is_system: bool = False
+    is_modified: bool = False
 
 
 class NetworkProfileSettings(BaseModel):
@@ -91,6 +95,8 @@ class NetworkProfile(BaseModel):
     name: str
     settings: SerializeAsAny[NetworkProfileSettings]
     on_disk: bool = False
+    is_system: bool = False
+    is_modified: bool = False
 
 
 class VolumeProfileSettings(BaseModel):
@@ -112,6 +118,8 @@ class VolumeProfile(BaseModel):
     name: str
     settings: VolumeProfileSettings
     on_disk: bool = False
+    is_system: bool = False
+    is_modified: bool = False
 
 
 class Node(BaseModel):
@@ -162,6 +170,7 @@ class SessionConstraints(BaseModel):
 
 
 class SessionRequest(BaseModel):
+    name: Optional[str] = None
     node: dict
     image: str
     profile: ContainerProfile

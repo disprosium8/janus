@@ -33,7 +33,9 @@ class ProfileManager(QueryUser):
             log.debug(f"Adding default network profile {nname}")
             driver = "null" if nname == "none" else nname
             nprof = NetworkProfile(
-                name=nname, settings=NetworkProfileSettings(driver=driver)
+                name=nname,
+                settings=NetworkProfileSettings(driver=driver),
+                is_system=True,
             )
             self._db.upsert(net_tbl, nprof.model_dump(), "name", nname)
 
@@ -101,6 +103,9 @@ class ProfileManager(QueryUser):
                                                 "name": key,
                                                 "settings": value,
                                                 "on_disk": True,
+                                                "is_system": key == "default"
+                                                or key in settings.DEFAULT_NET_PROFILES,
+                                                "is_modified": False,
                                             }
                                             NetworkProfile(**prof)
                                             cfg._networks[key] = value
@@ -117,6 +122,8 @@ class ProfileManager(QueryUser):
                                                 "name": key,
                                                 "settings": value,
                                                 "on_disk": True,
+                                                "is_system": key == "default",
+                                                "is_modified": False,
                                             }
                                             VolumeProfile(**prof)
                                             cfg._volumes[key] = value
@@ -133,6 +140,8 @@ class ProfileManager(QueryUser):
                                                 "name": key,
                                                 "settings": value,
                                                 "on_disk": True,
+                                                "is_system": key == "default",
+                                                "is_modified": False,
                                             }
                                             QoS_Controller(**prof)
                                             cfg._qos[key] = value
@@ -149,6 +158,8 @@ class ProfileManager(QueryUser):
                                                 "name": key,
                                                 "settings": temp,
                                                 "on_disk": True,
+                                                "is_system": key == "default",
+                                                "is_modified": False,
                                             }
                                             ContainerProfile(**prof)
                                             cfg._profiles[key] = temp
