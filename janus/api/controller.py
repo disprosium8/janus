@@ -33,7 +33,6 @@ from janus.api.models_api import (
     AuthRequest,
     AuthBulkRequest,
     GenericDictResponse,
-    GenericListResponse,
     GenericResponse,
     NodeResponse,
     NodeListResponse,
@@ -207,7 +206,7 @@ def get_logs(path: LogPath, query: LogQuery):
 @api.get(
     "/active",
     tags=[tag_sessions],
-    responses={"200": GenericListResponse},
+    responses={"200": SessionListResponse},
     summary="Get all active sessions",
 )
 @auth_required
@@ -233,7 +232,7 @@ def get_active(query: ActiveQuery):
 @api.get(
     "/active/<int:aid>",
     tags=[tag_sessions],
-    responses={"200": GenericListResponse},
+    responses={"200": SessionResponse},
     summary="Get a specific active session",
 )
 @auth_required
@@ -260,7 +259,7 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
 @api.put(
     "/active/<int:aid>",
     tags=[tag_sessions],
-    responses={"200": GenericListResponse},
+    responses={"200": SessionResponse},
     summary="Update a specific active session",
 )
 @auth_required
@@ -290,7 +289,7 @@ def put_active(path: ActivePath, body: SessionRequest):
 @api.post(
     "/active/<int:aid>/apply",
     tags=[tag_sessions],
-    responses={"200": GenericListResponse},
+    responses={"200": SessionResponse},
     summary="Apply changes to a session",
 )
 @auth_required
@@ -315,7 +314,7 @@ def post_active_apply(path: ActivePath):
 @api.delete(
     "/active/<int:aid>",
     tags=[tag_sessions],
-    responses={"200": GenericListResponse},
+    responses={"204": RESP_204},
     summary="Delete a specific active session",
 )
 @auth_required
@@ -348,7 +347,7 @@ def delete_active(path: ActivePath, query: ActiveQuery):
 @api.get(
     "/nodes",
     tags=[tag_nodes],
-    responses={"200": GenericListResponse},
+    responses={"200": NodeListResponse},
     summary="Get nodes",
 )
 @auth_required
@@ -379,17 +378,20 @@ def get_nodes(query: NodeQuery):
 @api.get(
     "/nodes/<node>",
     tags=[tag_nodes],
-    responses={"200": GenericListResponse},
+    responses={"200": NodeResponse},
     summary="Get node by name",
 )
 @api.get(
     "/nodes/<int:id>",
     tags=[tag_nodes],
-    responses={"200": GenericListResponse},
+    responses={"200": NodeResponse},
     summary="Get node by ID",
 )
 @auth_required
 def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
+    """
+    Get detailed information about a specific node by its ID or name.
+    """
     node = path.node
     node_id = path.id
     (user, group) = get_authinfo(request)
@@ -408,7 +410,7 @@ def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
 @api.post(
     "/nodes",
     tags=[tag_nodes],
-    responses={"200": GenericListResponse},
+    responses={"200": NodeResponse},
     summary="Add a new node",
 )
 @auth_required
@@ -439,13 +441,13 @@ def add_node(body: AddEndpointRequest):
 @api.delete(
     "/nodes/<node>",
     tags=[tag_nodes],
-    responses={"200": GenericListResponse},
+    responses={"204": RESP_204},
     summary="Delete node by name",
 )
 @api.delete(
     "/nodes/<int:id>",
     tags=[tag_nodes],
-    responses={"200": GenericListResponse},
+    responses={"204": RESP_204},
     summary="Delete node by ID",
 )
 @auth_required
@@ -484,7 +486,7 @@ def delete_node(path: NodePath):
 @api.post(
     "/create",
     tags=[tag_sessions],
-    responses={"200": GenericDictResponse},
+    responses={"200": SessionCreateResponse},
     summary="Create one or more new sessions.",
 )
 @auth_required
@@ -593,7 +595,7 @@ def stop_session_endpoint(path: ActivePath):
 @api.post(
     "/exec",
     tags=[tag_sessions],
-    responses={"200": GenericDictResponse},
+    responses={"200": ExecResponse},
     summary="Execute a container command inside an active session.",
 )
 @auth_required
@@ -640,13 +642,13 @@ def exec_command(body: ExecRequest):
 @api.get(
     "/images",
     tags=[tag_images],
-    responses={"200": GenericListResponse},
+    responses={"200": ImageListResponse},
     summary="Get images",
 )
 @api.get(
     "/images/<path:name>",
     tags=[tag_images],
-    responses={"200": GenericListResponse},
+    responses={"200": ImageResponse},
     summary="Get a specific image",
 )
 @auth_required
@@ -712,7 +714,7 @@ def _handle_get_profiles(resource, query, rname=None):
 @api.get(
     "/profiles",
     tags=[tag_profiles],
-    responses={"200": GenericListResponse},
+    responses={"200": ProfileListResponse},
     summary="Get host profiles (default)",
 )
 @auth_required
@@ -726,7 +728,7 @@ def get_profiles_default(query: ProfileQuery):
 @api.get(
     "/profiles/<path:resource>",
     tags=[tag_profiles],
-    responses={"200": GenericListResponse},
+    responses={"200": ProfileListResponse},
     summary="Get profiles for a resource",
 )
 @auth_required
@@ -740,7 +742,7 @@ def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
 @api.get(
     "/profiles/<path:resource>/<path:rname>",
     tags=[tag_profiles],
-    responses={"200": GenericListResponse},
+    responses={"200": ProfileResponse},
     summary="Get a specific profile",
 )
 @auth_required
@@ -754,7 +756,7 @@ def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
 @api.post(
     "/profiles/<path:resource>/<path:rname>",
     tags=[tag_profiles],
-    responses={"200": GenericListResponse},
+    responses={"200": ProfileResponse},
     summary="Create a new profile",
 )
 @auth_required
@@ -832,7 +834,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
 @api.put(
     "/profiles/<path:resource>/<path:rname>",
     tags=[tag_profiles],
-    responses={"200": GenericListResponse},
+    responses={"200": ProfileResponse},
     summary="Update a profile",
 )
 @auth_required
@@ -910,7 +912,7 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
 @api.delete(
     "/profiles/<path:resource>/<path:rname>",
     tags=[tag_profiles],
-    responses={"200": GenericListResponse},
+    responses={"204": RESP_204},
     summary="Remove a profile",
 )
 @auth_required
@@ -956,7 +958,7 @@ RESOURCE_DB_MAP = {
 @api.post(
     "/auth/bulk",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthBulkResponse},
     summary="Bulk update auth info",
 )
 @auth_required
@@ -1013,19 +1015,19 @@ def post_auth_bulk(body: AuthBulkRequest):
 @api.get(
     "/auth/<path:resource>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Get auth info",
 )
 @api.get(
     "/auth/<path:resource>/<int:rid>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Get specific auth info by ID",
 )
 @api.get(
     "/auth/<path:resource>/<path:rname>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Get specific auth info by name",
 )
 @auth_required
@@ -1067,13 +1069,13 @@ def get_auth(path: AuthPath, query: AuthQuery):
 @api.post(
     "/auth/<path:resource>/<int:rid>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Update auth info by ID",
 )
 @api.post(
     "/auth/<path:resource>/<path:rname>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Update auth info by name",
 )
 @auth_required
@@ -1119,13 +1121,13 @@ def post_auth(path: AuthPath, body: AuthRequest):
 @api.delete(
     "/auth/<path:resource>/<int:rid>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Delete auth info by ID",
 )
 @api.delete(
     "/auth/<path:resource>/<path:rname>",
     tags=[tag_auth],
-    responses={"200": GenericDictResponse},
+    responses={"200": AuthInfoResponse},
     summary="Delete auth info by name",
 )
 @auth_required

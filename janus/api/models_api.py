@@ -3,23 +3,39 @@ from typing import List, Optional, Union, Any, Dict
 
 
 class AddEndpointRequest(BaseModel):
-    type: int
-    name: str
-    url: str
-    edge_type: Optional[int] = None
-    public_url: Optional[str] = None
+    type: int = Field(..., description="Endpoint type identifier (e.g. Docker, Slurm)")
+    name: str = Field(..., description="Name of the endpoint node")
+    url: str = Field(..., description="Base URL of the endpoint API")
+    edge_type: Optional[int] = Field(
+        None, description="Optional Edge Type classification"
+    )
+    public_url: Optional[str] = Field(
+        None, description="Optional public URL if operating behind NAT"
+    )
 
 
 class SessionRequest(BaseModel):
     name: Optional[str] = Field(None, description="Optional session name")
-    instances: List[Union[dict, str]]
-    image: str
-    profile: str
-    constraints: Optional[dict] = dict()
-    arguments: Optional[str] = None
-    remove_container: Optional[bool] = False
-    kwargs: Optional[dict] = dict()
-    overrides: Optional[dict] = dict()
+    instances: List[Union[dict, str]] = Field(
+        ..., description="List of instances or node names to deploy"
+    )
+    image: str = Field(..., description="Docker image to run")
+    profile: str = Field(..., description="Host profile defining deployment parameters")
+    constraints: Optional[dict] = Field(
+        default_factory=dict, description="Resource and scheduling constraints"
+    )
+    arguments: Optional[str] = Field(
+        None, description="Command line arguments for the container"
+    )
+    remove_container: Optional[bool] = Field(
+        False, description="Automatically remove container on exit"
+    )
+    kwargs: Optional[dict] = Field(
+        default_factory=dict, description="Additional docker kwargs"
+    )
+    overrides: Optional[dict] = Field(
+        default_factory=dict, description="Profile overrides specific to this session"
+    )
 
 
 # Helper for list of requests
@@ -159,52 +175,75 @@ class GenericResponse(RootModel[Any]):
 
 
 class NodeResponse(BaseModel):
-    id: Union[int, str]
-    name: str
+    id: Union[int, str] = Field(..., description="Unique identifier for the node")
+    name: str = Field(..., description="Name of the node")
     model_config = {"extra": "allow"}
+
 
 class NodeListResponse(RootModel[List[NodeResponse]]):
     pass
 
+
 class SessionResponse(BaseModel):
-    id: Optional[int] = None
-    name: Optional[str] = None
-    services: Optional[Dict[str, Any]] = None
+    id: Optional[int] = Field(None, description="Session identifier")
+    name: Optional[str] = Field(None, description="Name of the session")
+    services: Optional[Dict[str, Any]] = Field(
+        None, description="Services running in this session"
+    )
     model_config = {"extra": "allow"}
+
 
 class SessionListResponse(RootModel[List[SessionResponse]]):
     pass
 
+
 class ProfileResponse(BaseModel):
-    name: str
-    settings: Dict[str, Any]
-    is_system: Optional[bool] = None
-    on_disk: Optional[bool] = None
-    is_modified: Optional[bool] = None
+    name: str = Field(..., description="Name of the profile")
+    settings: Dict[str, Any] = Field(
+        ..., description="Configuration settings for the profile"
+    )
+    is_system: Optional[bool] = Field(
+        None, description="Whether this is a built-in system profile"
+    )
+    on_disk: Optional[bool] = Field(
+        None, description="Whether this profile is saved to disk"
+    )
+    is_modified: Optional[bool] = Field(
+        None, description="Whether this profile has unsaved modifications"
+    )
     model_config = {"extra": "allow"}
+
 
 class ProfileListResponse(RootModel[List[ProfileResponse]]):
     pass
 
+
 class ImageResponse(BaseModel):
-    name: str
+    name: str = Field(..., description="Name and tag of the image")
     model_config = {"extra": "allow"}
+
 
 class ImageListResponse(RootModel[List[ImageResponse]]):
     pass
 
+
 class AuthInfoResponse(BaseModel):
-    users: Optional[List[str]] = None
-    groups: Optional[List[str]] = None
+    users: Optional[List[str]] = Field(None, description="List of authorized users")
+    groups: Optional[List[str]] = Field(None, description="List of authorized groups")
     model_config = {"extra": "allow"}
+
 
 class SessionCreateResponse(RootModel[Dict[str, Dict[str, int]]]):
     pass
 
+
 class AuthBulkResponse(BaseModel):
-    resource: str
-    results: List[Dict[str, Any]]
+    resource: str = Field(..., description="Resource type updated")
+    results: List[Dict[str, Any]] = Field(
+        ..., description="List of individual update results"
+    )
+
 
 class ExecResponse(BaseModel):
-    id: Optional[str] = None
+    id: Optional[str] = Field(None, description="Execution ID")
     model_config = {"extra": "allow"}
