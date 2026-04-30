@@ -134,3 +134,17 @@ class AuthPath(BaseModel):
     resource: str = Field(..., description="Resource type")
     rid: Optional[int] = Field(None, description="Auth ID")
     rname: Optional[str] = Field(None, description="Auth name")
+
+
+from typing import Any, Dict
+
+class GenericDictResponse(RootModel[Dict[str, Any]]):
+    pass
+
+
+class GenericListResponse(RootModel[List[Any]]):
+    pass
+
+
+class GenericResponse(RootModel[Any]):
+    pass

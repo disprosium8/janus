@@ -9,15 +9,20 @@ from flask_jwt_extended import (
     create_access_token,
     get_jwt_identity,
 )
+from pydantic import BaseModel
 
 from janus.api.controller import httpauth, admin_required, api as controller_api
 
 log = logging.getLogger(__name__)
 
+class TokenResponse(BaseModel):
+    access_token: str
 
-@controller_api.post("/token", summary="Get Token")
+class CheckTokenResponse(BaseModel):
+    logged_in_as: str
+
+@controller_api.post("/token", summary="Get Token", responses={"200": TokenResponse})
 @httpauth.login_required
-@admin_required
 def get_token():
     """
     Get Token
@@ -28,7 +33,7 @@ def get_token():
     return jsonify(access_token=access_token)
 
 
-@controller_api.get("/token", summary="Check Token")
+@controller_api.get("/token", summary="Check Token", responses={"200": CheckTokenResponse})
 @jwt_required()
 def check_token():
     """

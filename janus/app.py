@@ -10,6 +10,7 @@ import sys
 from flask_openapi3 import OpenAPI, Info
 from flask_sock import Sock
 
+from janus import __version__
 from janus.api.controller import api as controller_api
 from janus.api.agent import api as agent_api
 from janus import settings
@@ -22,10 +23,22 @@ from janus.api.sockets import handle_websocket
 
 info = Info(
     title="The ESnet Janus container API",
-    version="0.1",
+    version=__version__,
     description="REST endpoints for container provisioning and tuning",
 )
-app = OpenAPI(__name__, info=info)
+security_schemes = {
+    "jwt": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+    },
+    "basicAuth": {
+        "type": "http",
+        "scheme": "basic"
+    }
+}
+
+app = OpenAPI(__name__, info=info, security_schemes=security_schemes)
 sock = Sock(app)
 
 logging_conf_path = os.path.normpath(

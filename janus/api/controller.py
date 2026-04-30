@@ -4,6 +4,7 @@ from typing import Optional
 
 from flask import request, jsonify, abort
 from flask_httpauth import HTTPBasicAuth
+from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from flask_openapi3 import APIBlueprint, Tag
 from pydantic import ValidationError, BaseModel
 from werkzeug.security import check_password_hash
@@ -59,8 +60,14 @@ tag = Tag(
 )
 api_prefix = getattr(settings, "API_PREFIX", "") or ""
 api = APIBlueprint(
-    "controller", __name__, url_prefix=api_prefix + "/janus/controller", abp_tags=[tag]
+    "controller",
+    __name__,
+    url_prefix=api_prefix + "/janus/controller",
+    abp_tags=[tag],
+    abp_security=[{"jwt": []}, {"basicAuth": []}],
 )
+
+RESP_ANY = {"description": "Success", "content": {"application/json": {"schema": {}}}}
 
 
 @httpauth.error_handler
@@ -75,10 +82,28 @@ def verify_password(username, password):
         return username
 
 
+def auth_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        try:
+            verify_jwt_in_request()
+            return f(*args, **kwargs)
+        except Exception:
+            return httpauth.login_required(f)(*args, **kwargs)
+
+    return wrapper
+
+
 def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not httpauth.current_user() == "admin":
+        try:
+            verify_jwt_in_request()
+            api_user = get_jwt_identity()
+        except Exception:
+            api_user = httpauth.current_user()
+
+        if not api_user == "admin":
             abort(403)
         return f(*args, **kwargs)
 
@@ -86,7 +111,12 @@ def admin_required(f):
 
 
 def get_authinfo(request):
-    api_user = httpauth.current_user()
+    try:
+        verify_jwt_in_request()
+        api_user = get_jwt_identity()
+    except Exception:
+        api_user = httpauth.current_user()
+
     if api_user == "admin":
         user = request.args.get("user", None)
         group = request.args.get("group", None)
@@ -99,9 +129,9 @@ def get_authinfo(request):
 
 @api.get(
     "/active/<int:aid>/logs/<path:nname>",
-    summary="Display logs for a specific active session and node.",
+    responses={"200": RESP_ANY}, summary="Display logs for a specific active session and node.",
 )
-@httpauth.login_required
+@auth_required
 def get_logs(path: LogPath, query: LogQuery):
     """
     Display logs for a specific active session and node.
@@ -144,8 +174,8 @@ def get_logs(path: LogPath, query: LogQuery):
     return {"error": "Not found"}, 404
 
 
-@api.get("/active", summary="Get all active sessions")
-@httpauth.login_required
+@api.get("/active", responses={"200": RESP_ANY}, summary="Get all active sessions")
+@auth_required
 def get_active(query: ActiveQuery):
     """
     Get active sessions
@@ -165,8 +195,8 @@ def get_active(query: ActiveQuery):
     return jsonify(filter_fields(res, fields))
 
 
-@api.get("/active/<int:aid>", summary="Get a specific active session")
-@httpauth.login_required
+@api.get("/active/<int:aid>", responses={"200": RESP_ANY}, summary="Get a specific active session")
+@auth_required
 def get_active_by_id(path: ActivePath, query: ActiveQuery):
     """
     Get a specific active session
@@ -187,8 +217,8 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
     return {"error": "Not found"}, 404
 
 
-@api.put("/active/<int:aid>", summary="Update a specific active session")
-@httpauth.login_required
+@api.put("/active/<int:aid>", responses={"200": RESP_ANY}, summary="Update a specific active session")
+@auth_required
 def put_active(path: ActivePath, body: SessionRequest):
     """
     Update a session's name or desired configuration.
@@ -211,8 +241,8 @@ def put_active(path: ActivePath, body: SessionRequest):
         return jsonify({"error": str(e)}), 500
 
 
-@api.post("/active/<int:aid>/apply", summary="Apply changes to a session")
-@httpauth.login_required
+@api.post("/active/<int:aid>/apply", responses={"200": RESP_ANY}, summary="Apply changes to a session")
+@auth_required
 def post_active_apply(path: ActivePath):
     """
     Re-provision a session to apply modified settings.
@@ -230,8 +260,8 @@ def post_active_apply(path: ActivePath):
         return jsonify({"error": str(e)}), 500
 
 
-@api.delete("/active/<int:aid>", summary="Delete a specific active session")
-@httpauth.login_required
+@api.delete("/active/<int:aid>", responses={"200": RESP_ANY}, summary="Delete a specific active session")
+@auth_required
 def delete_active(path: ActivePath, query: ActiveQuery):
     """
     Delete a session by id.
@@ -258,8 +288,8 @@ def delete_active(path: ActivePath, query: ActiveQuery):
         return jsonify({"error": f"Deleting session failed:FATAL:{type(e)}:{e}"}), 500
 
 
-@api.get("/nodes", summary="Get nodes")
-@httpauth.login_required
+@api.get("/nodes", responses={"200": RESP_ANY}, summary="Get nodes")
+@auth_required
 def get_nodes(query: NodeQuery):
     """
     List all nodes.
@@ -284,9 +314,9 @@ def get_nodes(query: NodeQuery):
     return jsonify(filter_fields(res, fields))
 
 
-@api.get("/nodes/<node>", summary="Get node by name")
-@api.get("/nodes/<int:id>", summary="Get node by ID")
-@httpauth.login_required
+@api.get("/nodes/<node>", responses={"200": RESP_ANY}, summary="Get node by name")
+@api.get("/nodes/<int:id>", responses={"200": RESP_ANY}, summary="Get node by ID")
+@auth_required
 def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
     node = path.node
     node_id = path.id
@@ -303,8 +333,8 @@ def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
     return jsonify(filter_fields(res, query.fields))
 
 
-@api.post("/nodes", summary="Add a new node")
-@httpauth.login_required
+@api.post("/nodes", responses={"200": RESP_ANY}, summary="Add a new node")
+@auth_required
 @admin_required
 def add_node(body: AddEndpointRequest):
     """
@@ -328,9 +358,9 @@ def add_node(body: AddEndpointRequest):
         return jsonify({"error": f"Adding endpoint failed: {e}"}), 500
 
 
-@api.delete("/nodes/<node>", summary="Delete node by name")
-@api.delete("/nodes/<int:id>", summary="Delete node by ID")
-@httpauth.login_required
+@api.delete("/nodes/<node>", responses={"200": RESP_ANY}, summary="Delete node by name")
+@api.delete("/nodes/<int:id>", responses={"200": RESP_ANY}, summary="Delete node by ID")
+@auth_required
 def delete_node(path: NodePath):
     """
     Deletes a node (endpoint).
@@ -363,8 +393,8 @@ def delete_node(path: NodePath):
         return jsonify({"error": f"Deleting endpoint failed: {e}"}), 500
 
 
-@api.post("/create", summary="Create one or more new sessions.")
-@httpauth.login_required
+@api.post("/create", responses={"200": RESP_ANY}, summary="Create one or more new sessions.")
+@auth_required
 def create_sessions(body: SessionRequestList):
     """
     Create one or more new sessions.
@@ -405,8 +435,8 @@ def create_sessions(body: SessionRequestList):
         return jsonify({"error": f"Creating session failed. Unexpected: {type(e)}:{e}"}), 500
 
 
-@api.put("/start/<int:aid>", summary="Start a container service by id.")
-@httpauth.login_required
+@api.put("/start/<int:aid>", responses={"200": RESP_ANY}, summary="Start a container service by id.")
+@auth_required
 def start_session_endpoint(path: ActivePath):
     """
     Start a container service by id.
@@ -431,8 +461,8 @@ def start_session_endpoint(path: ActivePath):
         return jsonify({"error": f"Starting session failed:FATAL:{type(e)}:{e}"}), 500
 
 
-@api.put("/stop/<int:aid>", summary="Stop a container service by id.")
-@httpauth.login_required
+@api.put("/stop/<int:aid>", responses={"200": RESP_ANY}, summary="Stop a container service by id.")
+@auth_required
 def stop_session_endpoint(path: ActivePath):
     """
     Stop a container service by id.
@@ -456,8 +486,8 @@ def stop_session_endpoint(path: ActivePath):
 
 
 
-@api.post("/exec", summary="Execute a container command inside an active session.")
-@httpauth.login_required
+@api.post("/exec", responses={"200": RESP_ANY}, summary="Execute a container command inside an active session.")
+@auth_required
 def exec_command(body: ExecRequest):
     """
     Execute a container command inside an active session.
@@ -498,9 +528,9 @@ def exec_command(body: ExecRequest):
         return jsonify({"error": f"Could not execute command: {e}"}), 500
 
 
-@api.get("/images", summary="Get images")
-@api.get("/images/<path:name>", summary="Get a specific image")
-@httpauth.login_required
+@api.get("/images", responses={"200": RESP_ANY}, summary="Get images")
+@api.get("/images/<path:name>", responses={"200": RESP_ANY}, summary="Get a specific image")
+@auth_required
 def get_images(path: ImagePath, query: ImageQuery):
     """
     List all images or a specific image.
@@ -560,8 +590,8 @@ def _handle_get_profiles(resource, query, rname=None):
         return jsonify(filter_fields(ret if ret else list(), query.fields))
 
 
-@api.get("/profiles", summary="Get host profiles (default)")
-@httpauth.login_required
+@api.get("/profiles", responses={"200": RESP_ANY}, summary="Get host profiles (default)")
+@auth_required
 def get_profiles_default(query: ProfileQuery):
     """
     Get host profiles (defaults to 'host' resource).
@@ -569,8 +599,8 @@ def get_profiles_default(query: ProfileQuery):
     return _handle_get_profiles("host", query)
 
 
-@api.get("/profiles/<path:resource>", summary="Get profiles for a resource")
-@httpauth.login_required
+@api.get("/profiles/<path:resource>", responses={"200": RESP_ANY}, summary="Get profiles for a resource")
+@auth_required
 def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
     """
     Get all profiles for a specific resource type.
@@ -578,8 +608,8 @@ def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
     return _handle_get_profiles(path.resource, query)
 
 
-@api.get("/profiles/<path:resource>/<path:rname>", summary="Get a specific profile")
-@httpauth.login_required
+@api.get("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Get a specific profile")
+@auth_required
 def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
     """
     Get a specific profile by resource type and name.
@@ -587,8 +617,8 @@ def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
     return _handle_get_profiles(path.resource, query, rname=path.rname)
 
 
-@api.post("/profiles/<path:resource>/<path:rname>", summary="Create a new profile")
-@httpauth.login_required
+@api.post("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Create a new profile")
+@auth_required
 def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     """
     Create a new profile.
@@ -660,8 +690,8 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
 
-@api.put("/profiles/<path:resource>/<path:rname>", summary="Update a profile")
-@httpauth.login_required
+@api.put("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Update a profile")
+@auth_required
 def put_profile(path: ProfileFullByPath, body: ProfileRequest):
     """
     Update an existing profile.
@@ -733,8 +763,8 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
     return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
 
-@api.delete("/profiles/<path:resource>/<path:rname>", summary="Remove a profile")
-@httpauth.login_required
+@api.delete("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Remove a profile")
+@auth_required
 def delete_profile(path: ProfileFullByPath):
     """
     Remove a profile.
@@ -774,8 +804,8 @@ RESOURCE_DB_MAP = {
 }
 
 
-@api.post("/auth/bulk", summary="Bulk update auth info")
-@httpauth.login_required
+@api.post("/auth/bulk", responses={"200": RESP_ANY}, summary="Bulk update auth info")
+@auth_required
 @admin_required
 def post_auth_bulk(body: AuthBulkRequest):
     """
@@ -825,10 +855,10 @@ def post_auth_bulk(body: AuthBulkRequest):
     return jsonify({"resource": resource, "results": results}), 200
 
 
-@api.get("/auth/<path:resource>", summary="Get auth info")
-@api.get("/auth/<path:resource>/<int:rid>", summary="Get specific auth info by ID")
-@api.get("/auth/<path:resource>/<path:rname>", summary="Get specific auth info by name")
-@httpauth.login_required
+@api.get("/auth/<path:resource>", responses={"200": RESP_ANY}, summary="Get auth info")
+@api.get("/auth/<path:resource>/<int:rid>", responses={"200": RESP_ANY}, summary="Get specific auth info by ID")
+@api.get("/auth/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Get specific auth info by name")
+@auth_required
 def get_auth(path: AuthPath, query: AuthQuery):
     """
     Get user and group attributes for a named resource.
@@ -862,9 +892,9 @@ def get_auth(path: AuthPath, query: AuthQuery):
     return jsonify(filter_fields({"users": users, "groups": groups}, query.fields))
 
 
-@api.post("/auth/<path:resource>/<int:rid>", summary="Update auth info by ID")
-@api.post("/auth/<path:resource>/<path:rname>", summary="Update auth info by name")
-@httpauth.login_required
+@api.post("/auth/<path:resource>/<int:rid>", responses={"200": RESP_ANY}, summary="Update auth info by ID")
+@api.post("/auth/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Update auth info by name")
+@auth_required
 def post_auth(path: AuthPath, body: AuthRequest):
     """
     Set user and group attributes for a named resource.
@@ -902,9 +932,9 @@ def post_auth(path: AuthPath, body: AuthRequest):
     return res, 200
 
 
-@api.delete("/auth/<path:resource>/<int:rid>", summary="Delete auth info by ID")
-@api.delete("/auth/<path:resource>/<path:rname>", summary="Delete auth info by name")
-@httpauth.login_required
+@api.delete("/auth/<path:resource>/<int:rid>", responses={"200": RESP_ANY}, summary="Delete auth info by ID")
+@api.delete("/auth/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Delete auth info by name")
+@auth_required
 def delete_auth(path: AuthPath, body: AuthRequest):
     """
     Remove user and group attributes for a named resource.

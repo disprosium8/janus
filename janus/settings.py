@@ -54,8 +54,7 @@ class JanusConfig:
             self._users = {user: generate_password_hash(pwd)}
         else:
             self._users = {
-                "admin": generate_password_hash("admin"),
-                "kissel": generate_password_hash("kissel"),
+                "admin": generate_password_hash("admin")
             }
 
         self._features = {
