@@ -32,6 +32,21 @@ from janus.api.models_api import (
     AuthPath,
     AuthRequest,
     AuthBulkRequest,
+    GenericDictResponse,
+    GenericListResponse,
+    GenericResponse,
+    NodeResponse,
+    NodeListResponse,
+    SessionResponse,
+    SessionListResponse,
+    ProfileResponse,
+    ProfileListResponse,
+    ImageResponse,
+    ImageListResponse,
+    AuthInfoResponse,
+    SessionCreateResponse,
+    AuthBulkResponse,
+    ExecResponse,
 )
 from janus.api.utils import Constants
 
@@ -54,20 +69,33 @@ def filter_fields(res, fields: Optional[str]):
     return res
 
 
-tag = Tag(
-    name="janus/controller",
-    description="Operations for Janus on-demand container provisioning",
+class ErrorResponse(BaseModel):
+    error: str
+
+
+RESP_204 = {"description": "No Content"}
+
+tag_sessions = Tag(name="Sessions", description="Operations on active sessions")
+tag_nodes = Tag(name="Nodes", description="Operations on endpoint nodes")
+tag_profiles = Tag(name="Profiles", description="Operations on profiles")
+tag_auth = Tag(
+    name="Auth", description="Operations on authentication and authorization"
 )
+tag_images = Tag(name="Images", description="Operations on images")
+
 api_prefix = getattr(settings, "API_PREFIX", "") or ""
 api = APIBlueprint(
     "controller",
     __name__,
     url_prefix=api_prefix + "/janus/controller",
-    abp_tags=[tag],
     abp_security=[{"jwt": []}, {"basicAuth": []}],
+    abp_responses={
+        "400": ErrorResponse,
+        "403": ErrorResponse,
+        "404": ErrorResponse,
+        "500": ErrorResponse,
+    },
 )
-
-RESP_ANY = {"description": "Success", "content": {"application/json": {"schema": {}}}}
 
 
 @httpauth.error_handler
@@ -129,7 +157,9 @@ def get_authinfo(request):
 
 @api.get(
     "/active/<int:aid>/logs/<path:nname>",
-    responses={"200": RESP_ANY}, summary="Display logs for a specific active session and node.",
+    tags=[tag_sessions],
+    responses={"200": GenericResponse},
+    summary="Display logs for a specific active session and node.",
 )
 @auth_required
 def get_logs(path: LogPath, query: LogQuery):
@@ -156,13 +186,13 @@ def get_logs(path: LogPath, query: LogQuery):
                 tail = query.tail
                 svc = res["services"][nname]
                 cid = svc[0]["container_id"]
-                
+
                 # Fetch current node info to get the correct node ID
                 ntable = dbase.get_table("nodes")
                 node_doc = dbase.get(ntable, name=nname)
                 if not node_doc:
                     return {"error": f"Node {nname} not found"}, 404
-                
+
                 n = Node(**node_doc)
                 handler = cfg.sm.get_handler(nname=nname)
                 return handler.get_logs(n, cid, since, stderr, stdout, tail, ts)
@@ -174,7 +204,12 @@ def get_logs(path: LogPath, query: LogQuery):
     return {"error": "Not found"}, 404
 
 
-@api.get("/active", responses={"200": RESP_ANY}, summary="Get all active sessions")
+@api.get(
+    "/active",
+    tags=[tag_sessions],
+    responses={"200": GenericListResponse},
+    summary="Get all active sessions",
+)
 @auth_required
 def get_active(query: ActiveQuery):
     """
@@ -195,7 +230,12 @@ def get_active(query: ActiveQuery):
     return jsonify(filter_fields(res, fields))
 
 
-@api.get("/active/<int:aid>", responses={"200": RESP_ANY}, summary="Get a specific active session")
+@api.get(
+    "/active/<int:aid>",
+    tags=[tag_sessions],
+    responses={"200": GenericListResponse},
+    summary="Get a specific active session",
+)
 @auth_required
 def get_active_by_id(path: ActivePath, query: ActiveQuery):
     """
@@ -217,7 +257,12 @@ def get_active_by_id(path: ActivePath, query: ActiveQuery):
     return {"error": "Not found"}, 404
 
 
-@api.put("/active/<int:aid>", responses={"200": RESP_ANY}, summary="Update a specific active session")
+@api.put(
+    "/active/<int:aid>",
+    tags=[tag_sessions],
+    responses={"200": GenericListResponse},
+    summary="Update a specific active session",
+)
 @auth_required
 def put_active(path: ActivePath, body: SessionRequest):
     """
@@ -225,23 +270,29 @@ def put_active(path: ActivePath, body: SessionRequest):
     """
     aid = path.aid
     (user, group) = get_authinfo(request)
-    
+
     try:
         from janus.api.session_manager import SessionManager
+
         sm = SessionManager()
         res = sm.update_session(aid, body.model_dump(), user, group)
-        
+
         # If immediate apply is requested via query param
-        if request.args.get('apply') == 'true':
+        if request.args.get("apply") == "true":
             res = sm.reprovision_session(aid, user, group)
-            
+
         return jsonify(res), 200
     except Exception as e:
         log.exception(f"Error updating session {aid}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-@api.post("/active/<int:aid>/apply", responses={"200": RESP_ANY}, summary="Apply changes to a session")
+@api.post(
+    "/active/<int:aid>/apply",
+    tags=[tag_sessions],
+    responses={"200": GenericListResponse},
+    summary="Apply changes to a session",
+)
 @auth_required
 def post_active_apply(path: ActivePath):
     """
@@ -249,9 +300,10 @@ def post_active_apply(path: ActivePath):
     """
     aid = path.aid
     (user, group) = get_authinfo(request)
-    
+
     try:
         from janus.api.session_manager import SessionManager
+
         sm = SessionManager()
         res = sm.reprovision_session(aid, user, group)
         return jsonify(res), 200
@@ -260,7 +312,12 @@ def post_active_apply(path: ActivePath):
         return jsonify({"error": str(e)}), 500
 
 
-@api.delete("/active/<int:aid>", responses={"200": RESP_ANY}, summary="Delete a specific active session")
+@api.delete(
+    "/active/<int:aid>",
+    tags=[tag_sessions],
+    responses={"200": GenericListResponse},
+    summary="Delete a specific active session",
+)
 @auth_required
 def delete_active(path: ActivePath, query: ActiveQuery):
     """
@@ -288,7 +345,12 @@ def delete_active(path: ActivePath, query: ActiveQuery):
         return jsonify({"error": f"Deleting session failed:FATAL:{type(e)}:{e}"}), 500
 
 
-@api.get("/nodes", responses={"200": RESP_ANY}, summary="Get nodes")
+@api.get(
+    "/nodes",
+    tags=[tag_nodes],
+    responses={"200": GenericListResponse},
+    summary="Get nodes",
+)
 @auth_required
 def get_nodes(query: NodeQuery):
     """
@@ -314,8 +376,18 @@ def get_nodes(query: NodeQuery):
     return jsonify(filter_fields(res, fields))
 
 
-@api.get("/nodes/<node>", responses={"200": RESP_ANY}, summary="Get node by name")
-@api.get("/nodes/<int:id>", responses={"200": RESP_ANY}, summary="Get node by ID")
+@api.get(
+    "/nodes/<node>",
+    tags=[tag_nodes],
+    responses={"200": GenericListResponse},
+    summary="Get node by name",
+)
+@api.get(
+    "/nodes/<int:id>",
+    tags=[tag_nodes],
+    responses={"200": GenericListResponse},
+    summary="Get node by ID",
+)
 @auth_required
 def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
     node = path.node
@@ -333,7 +405,12 @@ def get_node_by_id_or_name(path: NodePath, query: NodeQuery):
     return jsonify(filter_fields(res, query.fields))
 
 
-@api.post("/nodes", responses={"200": RESP_ANY}, summary="Add a new node")
+@api.post(
+    "/nodes",
+    tags=[tag_nodes],
+    responses={"200": GenericListResponse},
+    summary="Add a new node",
+)
 @auth_required
 @admin_required
 def add_node(body: AddEndpointRequest):
@@ -345,11 +422,12 @@ def add_node(body: AddEndpointRequest):
     try:
         log.debug(f"Adding node with body: {body.model_dump()}")
         res = cfg.sm.add_node(body)
-        
+
         # Trigger an immediate refresh for the new node
         from janus.api.db import init_db
+
         init_db(nname=body.name, refresh=True)
-        
+
         return jsonify(res)
     except ServiceManagerException as e:
         return jsonify({"error": f"Adding endpoint failed: {e}"}), 400
@@ -358,8 +436,18 @@ def add_node(body: AddEndpointRequest):
         return jsonify({"error": f"Adding endpoint failed: {e}"}), 500
 
 
-@api.delete("/nodes/<node>", responses={"200": RESP_ANY}, summary="Delete node by name")
-@api.delete("/nodes/<int:id>", responses={"200": RESP_ANY}, summary="Delete node by ID")
+@api.delete(
+    "/nodes/<node>",
+    tags=[tag_nodes],
+    responses={"200": GenericListResponse},
+    summary="Delete node by name",
+)
+@api.delete(
+    "/nodes/<int:id>",
+    tags=[tag_nodes],
+    responses={"200": GenericListResponse},
+    summary="Delete node by ID",
+)
 @auth_required
 def delete_node(path: NodePath):
     """
@@ -367,11 +455,11 @@ def delete_node(path: NodePath):
     """
     node = path.node
     node_id = path.id
-    
+
     (user, group) = get_authinfo(request)
     quser = QueryUser()
     q = quser.query_builder(user, group, {"id": node_id, "name": node})
-    
+
     dbase = cfg.db
     table = dbase.get_table("nodes")
     doc = dbase.get(table, query=q)
@@ -393,7 +481,12 @@ def delete_node(path: NodePath):
         return jsonify({"error": f"Deleting endpoint failed: {e}"}), 500
 
 
-@api.post("/create", responses={"200": RESP_ANY}, summary="Create one or more new sessions.")
+@api.post(
+    "/create",
+    tags=[tag_sessions],
+    responses={"200": GenericDictResponse},
+    summary="Create one or more new sessions.",
+)
 @auth_required
 def create_sessions(body: SessionRequestList):
     """
@@ -432,10 +525,17 @@ def create_sessions(body: SessionRequestList):
         return jsonify({"error": f"Creating session failed: {e}"}), 500
     except Exception as e:
         log.exception(f"Unexpected error creating sessions: {e}")
-        return jsonify({"error": f"Creating session failed. Unexpected: {type(e)}:{e}"}), 500
+        return jsonify(
+            {"error": f"Creating session failed. Unexpected: {type(e)}:{e}"}
+        ), 500
 
 
-@api.put("/start/<int:aid>", responses={"200": RESP_ANY}, summary="Start a container service by id.")
+@api.put(
+    "/start/<int:aid>",
+    tags=[tag_sessions],
+    responses={"200": GenericDictResponse},
+    summary="Start a container service by id.",
+)
 @auth_required
 def start_session_endpoint(path: ActivePath):
     """
@@ -461,7 +561,12 @@ def start_session_endpoint(path: ActivePath):
         return jsonify({"error": f"Starting session failed:FATAL:{type(e)}:{e}"}), 500
 
 
-@api.put("/stop/<int:aid>", responses={"200": RESP_ANY}, summary="Stop a container service by id.")
+@api.put(
+    "/stop/<int:aid>",
+    tags=[tag_sessions],
+    responses={"200": GenericDictResponse},
+    summary="Stop a container service by id.",
+)
 @auth_required
 def stop_session_endpoint(path: ActivePath):
     """
@@ -485,8 +590,12 @@ def stop_session_endpoint(path: ActivePath):
         return jsonify({"error": f"Stopping session failed:FATAL:{type(e)}:{e}"}), 500
 
 
-
-@api.post("/exec", responses={"200": RESP_ANY}, summary="Execute a container command inside an active session.")
+@api.post(
+    "/exec",
+    tags=[tag_sessions],
+    responses={"200": GenericDictResponse},
+    summary="Execute a container command inside an active session.",
+)
 @auth_required
 def exec_command(body: ExecRequest):
     """
@@ -528,8 +637,18 @@ def exec_command(body: ExecRequest):
         return jsonify({"error": f"Could not execute command: {e}"}), 500
 
 
-@api.get("/images", responses={"200": RESP_ANY}, summary="Get images")
-@api.get("/images/<path:name>", responses={"200": RESP_ANY}, summary="Get a specific image")
+@api.get(
+    "/images",
+    tags=[tag_images],
+    responses={"200": GenericListResponse},
+    summary="Get images",
+)
+@api.get(
+    "/images/<path:name>",
+    tags=[tag_images],
+    responses={"200": GenericListResponse},
+    summary="Get a specific image",
+)
 @auth_required
 def get_images(path: ImagePath, query: ImageQuery):
     """
@@ -539,7 +658,7 @@ def get_images(path: ImagePath, query: ImageQuery):
     (user, group) = get_authinfo(request)
     quser = QueryUser()
     q = quser.query_builder(user, group, {"name": name})
-    
+
     dbase = cfg.db
     table = dbase.get_table("images")
     if name:
@@ -590,7 +709,12 @@ def _handle_get_profiles(resource, query, rname=None):
         return jsonify(filter_fields(ret if ret else list(), query.fields))
 
 
-@api.get("/profiles", responses={"200": RESP_ANY}, summary="Get host profiles (default)")
+@api.get(
+    "/profiles",
+    tags=[tag_profiles],
+    responses={"200": GenericListResponse},
+    summary="Get host profiles (default)",
+)
 @auth_required
 def get_profiles_default(query: ProfileQuery):
     """
@@ -599,7 +723,12 @@ def get_profiles_default(query: ProfileQuery):
     return _handle_get_profiles("host", query)
 
 
-@api.get("/profiles/<path:resource>", responses={"200": RESP_ANY}, summary="Get profiles for a resource")
+@api.get(
+    "/profiles/<path:resource>",
+    tags=[tag_profiles],
+    responses={"200": GenericListResponse},
+    summary="Get profiles for a resource",
+)
 @auth_required
 def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
     """
@@ -608,7 +737,12 @@ def get_profiles_by_resource(path: ProfileResourcePath, query: ProfileQuery):
     return _handle_get_profiles(path.resource, query)
 
 
-@api.get("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Get a specific profile")
+@api.get(
+    "/profiles/<path:resource>/<path:rname>",
+    tags=[tag_profiles],
+    responses={"200": GenericListResponse},
+    summary="Get a specific profile",
+)
 @auth_required
 def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
     """
@@ -617,7 +751,12 @@ def get_profile_by_name(path: ProfileFullByPath, query: ProfileQuery):
     return _handle_get_profiles(path.resource, query, rname=path.rname)
 
 
-@api.post("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Create a new profile")
+@api.post(
+    "/profiles/<path:resource>/<path:rname>",
+    tags=[tag_profiles],
+    responses={"200": GenericListResponse},
+    summary="Create a new profile",
+)
 @auth_required
 def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     """
@@ -647,7 +786,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
 
         # Merge new configs into template
         default.update(configs)
-        
+
         prof = {
             "name": rname,
             "settings": default,
@@ -672,7 +811,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
         record = {"name": rname, "settings": default}
         res = cfg.db.insert(tbl, record)
         log.info(f"Created {rname} in database")
-        
+
         # Sync in-memory cache
         if resource == Constants.HOST:
             cfg._profiles[rname] = default
@@ -682,7 +821,7 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
             cfg._volumes[rname] = default
         elif resource == Constants.QOS:
             cfg._qos[rname] = default
-            
+
     except Exception as e:
         log.exception(f"Error saving new profile {rname} to DB: {e}")
         return jsonify({"error": str(e)}), 500
@@ -690,7 +829,12 @@ def post_profile(path: ProfileFullByPath, body: ProfileRequest):
     return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
 
-@api.put("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Update a profile")
+@api.put(
+    "/profiles/<path:resource>/<path:rname>",
+    tags=[tag_profiles],
+    responses={"200": GenericListResponse},
+    summary="Update a profile",
+)
 @auth_required
 def put_profile(path: ProfileFullByPath, body: ProfileRequest):
     """
@@ -712,7 +856,7 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
         # Start with existing settings rather than base template
         current_settings = res.settings.model_dump()
         current_settings.update(configs)
-        
+
         prof = {
             "name": rname,
             "settings": current_settings,
@@ -745,7 +889,7 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
         }
         cfg.db.update(tbl, record, name=rname)
         log.info(f"Updated {rname} in database (is_modified=True)")
-        
+
         # Manually sync in-memory cache instead of full disk reload
         if resource == Constants.HOST:
             cfg._profiles[rname] = current_settings
@@ -755,7 +899,7 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
             cfg._volumes[rname] = current_settings
         elif resource == Constants.QOS:
             cfg._qos[rname] = current_settings
-            
+
     except Exception as e:
         log.exception(f"Error saving updated profile {rname} to DB: {e}")
         return jsonify({"error": str(e)}), 500
@@ -763,7 +907,12 @@ def put_profile(path: ProfileFullByPath, body: ProfileRequest):
     return jsonify(cfg.pm.get_profile(resource, rname).model_dump()), 200
 
 
-@api.delete("/profiles/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Remove a profile")
+@api.delete(
+    "/profiles/<path:resource>/<path:rname>",
+    tags=[tag_profiles],
+    responses={"200": GenericListResponse},
+    summary="Remove a profile",
+)
 @auth_required
 def delete_profile(path: ProfileFullByPath):
     """
@@ -782,7 +931,7 @@ def delete_profile(path: ProfileFullByPath):
         return jsonify({"error": "Cannot delete default profile"}), 400
 
     (user, group) = get_authinfo(request)
-    
+
     try:
         res = cfg.pm.get_profile(resource, rname, user, group, inline=True)
         if not res:
@@ -804,7 +953,12 @@ RESOURCE_DB_MAP = {
 }
 
 
-@api.post("/auth/bulk", responses={"200": RESP_ANY}, summary="Bulk update auth info")
+@api.post(
+    "/auth/bulk",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Bulk update auth info",
+)
 @auth_required
 @admin_required
 def post_auth_bulk(body: AuthBulkRequest):
@@ -823,41 +977,57 @@ def post_auth_bulk(body: AuthBulkRequest):
     dbase = cfg.db
     table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
     results = []
-    
+
     from tinydb import Query
+
     Q = Query()
-    
+
     for ident in identifiers:
         # Determine if identifier is ID or Name
         if isinstance(ident, int):
-            query = (Q.id == ident)
+            query = Q.id == ident
         else:
-            query = (Q.name == ident)
-            
+            query = Q.name == ident
+
         res = dbase.get(table, query=query)
         if not res:
             results.append({"identifier": ident, "status": "not_found"})
             continue
-            
+
         current_users = set(res.get("users", []))
         current_groups = set(res.get("groups", []))
-        
+
         if remove:
             res["users"] = list(current_users - req_users)
             res["groups"] = list(current_groups - req_groups)
         else:
             res["users"] = list(current_users | req_users)
             res["groups"] = list(current_groups | req_groups)
-            
+
         dbase.update(table, res, query=query)
         results.append({"identifier": ident, "status": "updated"})
-        
+
     return jsonify({"resource": resource, "results": results}), 200
 
 
-@api.get("/auth/<path:resource>", responses={"200": RESP_ANY}, summary="Get auth info")
-@api.get("/auth/<path:resource>/<int:rid>", responses={"200": RESP_ANY}, summary="Get specific auth info by ID")
-@api.get("/auth/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Get specific auth info by name")
+@api.get(
+    "/auth/<path:resource>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Get auth info",
+)
+@api.get(
+    "/auth/<path:resource>/<int:rid>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Get specific auth info by ID",
+)
+@api.get(
+    "/auth/<path:resource>/<path:rname>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Get specific auth info by name",
+)
 @auth_required
 def get_auth(path: AuthPath, query: AuthQuery):
     """
@@ -866,34 +1036,46 @@ def get_auth(path: AuthPath, query: AuthQuery):
     resource = path.resource
     rid = path.rid
     rname = path.rname
-    
+
     if resource == "jwt":
         return {"jwt": cfg.sm.get_auth_token()}, 200
-        
+
     if resource not in Constants.AUTH_RESOURCES:
         return {"error": f"Invalid resource path: {resource}"}, 404
 
     (user, group) = get_authinfo(request)
     quser = QueryUser()
     q = quser.query_builder(user, group, {"id": rid, "name": rname})
-    
+
     if not q:
         return {"error": "Must specify resource id or name"}, 400
-        
+
     dbase = cfg.db
     table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
     res = dbase.get(table, query=q)
-    
+
     if not res:
-        return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
-        
+        return {
+            "error": f"{resource} resource not found with id {rid if rid else rname}"
+        }, 404
+
     users = res.get("users", list())
     groups = res.get("groups", list())
     return jsonify(filter_fields({"users": users, "groups": groups}, query.fields))
 
 
-@api.post("/auth/<path:resource>/<int:rid>", responses={"200": RESP_ANY}, summary="Update auth info by ID")
-@api.post("/auth/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Update auth info by name")
+@api.post(
+    "/auth/<path:resource>/<int:rid>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Update auth info by ID",
+)
+@api.post(
+    "/auth/<path:resource>/<path:rname>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Update auth info by name",
+)
 @auth_required
 def post_auth(path: AuthPath, body: AuthRequest):
     """
@@ -902,38 +1084,50 @@ def post_auth(path: AuthPath, body: AuthRequest):
     resource = path.resource
     rid = path.rid
     rname = path.rname
-    
+
     if resource not in Constants.AUTH_RESOURCES:
         return {"error": f"Invalid resource path: {resource}"}, 404
 
     (user, group) = get_authinfo(request)
     quser = QueryUser()
     query = quser.query_builder(user, group, {"id": rid, "name": rname})
-    
+
     if not query:
         return {"error": "Must specify resource id or name"}, 400
 
     dbase = cfg.db
     table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
     res = dbase.get(table, query=query)
-    
+
     if not res:
-        return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
+        return {
+            "error": f"{resource} resource not found with id {rid if rid else rname}"
+        }, 404
 
     req_users = body.users
     req_groups = body.groups
-    
+
     new_users = list(set(req_users).union(set(res.get("users", list()))))
     new_groups = list(set(req_groups).union(set(res.get("groups", list()))))
     res["users"] = new_users
     res["groups"] = new_groups
     dbase.update(table, res, query=query)
-    
+
     return res, 200
 
 
-@api.delete("/auth/<path:resource>/<int:rid>", responses={"200": RESP_ANY}, summary="Delete auth info by ID")
-@api.delete("/auth/<path:resource>/<path:rname>", responses={"200": RESP_ANY}, summary="Delete auth info by name")
+@api.delete(
+    "/auth/<path:resource>/<int:rid>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Delete auth info by ID",
+)
+@api.delete(
+    "/auth/<path:resource>/<path:rname>",
+    tags=[tag_auth],
+    responses={"200": GenericDictResponse},
+    summary="Delete auth info by name",
+)
 @auth_required
 def delete_auth(path: AuthPath, body: AuthRequest):
     """
@@ -942,23 +1136,25 @@ def delete_auth(path: AuthPath, body: AuthRequest):
     resource = path.resource
     rid = path.rid
     rname = path.rname
-    
+
     if resource not in Constants.AUTH_RESOURCES:
         return {"error": f"Invalid resource path: {resource}"}, 404
 
     (user, group) = get_authinfo(request)
     quser = QueryUser()
     query = quser.query_builder(user, group, {"id": rid, "name": rname})
-    
+
     if not query:
         return {"error": "Must specify resource id or name"}, 400
 
     dbase = cfg.db
     table = dbase.get_table(RESOURCE_DB_MAP.get(resource))
     res = dbase.get(table, query=query)
-    
+
     if not res:
-        return {"error": f"{resource} resource not found with id {rid if rid else rname}"}, 404
+        return {
+            "error": f"{resource} resource not found with id {rid if rid else rname}"
+        }, 404
 
     req_users = body.users
     req_groups = body.groups
@@ -973,6 +1169,6 @@ def delete_auth(path: AuthPath, body: AuthRequest):
             res["groups"].remove(g)
         except Exception:
             pass
-            
+
     dbase.update(table, res, query=query)
     return res, 200
